@@ -1,6 +1,6 @@
 # Privacy Enabled Streaming Service for a Dashboard
 
-The repository contains the code for the Privacy Enabled Streaming Service for a Dashboard. 
+The repository contains the code for the Privacy Enabled Streaming Service for a Dashboard. The streaming service enables query processing and reasoning over the streams.
 
 ## Tests
 
