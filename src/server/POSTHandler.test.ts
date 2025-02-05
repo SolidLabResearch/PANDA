@@ -9,13 +9,14 @@ describe('QueryHandler', () => {
     it('should handle ws query', async () => {
       // Mock dependencies and setup test data
       const query = 'SELECT * WHERE { ?s ?p ?o }';
+const rules = '';      
       const width = 10;
       const query_registry = {} as QueryRegistry;
       const logger = console;
       const websocket_connections = new Map();
 
       // Call the handle_ws_query method
-      await QueryHandler.handle_ws_query(query, width, query_registry, logger, websocket_connections, 'rspql', {});
+      await QueryHandler.handle_ws_query(query,rules, width, query_registry, logger, websocket_connections, 'rspql', {});
 
       // Assert the expected behavior
       // Add your assertions here

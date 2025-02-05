@@ -23,8 +23,8 @@ test('test_reasoning_engine_with_digits', async () => {
     `;
     const data = `<https://rsp.js/aggregation_event/1> <https://saref.etsi.org/core/hasValue> "10"^^<http://www.w3.org/2001/XMLSchema#float> .`
     const n3_reasoner = new N3ReasonerService(rules);
-    const result = await n3_reasoner.reason(data);
-    console.log(result);
+    const result = await n3_reasoner.reason(data);        
+    expect(result).toBe('<https://rsp.js/aggregation_event/1> <http://example.org/#is> <http://example.org/#standing> .')
 });
 
 test('test_reasoning_engine_with_aggregation_event_for_activity_index', async () => {
@@ -49,8 +49,5 @@ test('test_reasoning_engine_with_aggregation_event_for_activity_index', async ()
     `
     const n3_reasoner = new N3ReasonerService(rules);
     const result = await n3_reasoner.reason(data);
-    console.log(result);
-
+    expect(result).toBe('<https://rsp.js/aggregation_event/first> <http://example.org/#is> <http://example.org/#standing> .')
 });
-
-

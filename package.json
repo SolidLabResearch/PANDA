@@ -4,6 +4,7 @@
     "description": "Aggregation on top of streams generated from a Solid Pod",
     "main": "dist/index.js",
     "scripts": {
+        "build" : "npx tsc",
         "start": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js ",
         "start-aggregation": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js aggregation",
         "start-log": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js aggregation > logs/output.log",

@@ -70,17 +70,19 @@ export class WebSocketHandler {
                 if (message.type === 'utf8') {
                     const message_utf8 = message.utf8Data;
                     const ws_message = JSON.parse(message_utf8);
-                    if (Object.keys(ws_message).includes('query')) {
+                    if (Object.keys(ws_message).includes('query') && Object.keys(ws_message).includes('rules')) {
                         this.logger.info({ query: ws_message.query }, `new_query_received_from_client_ws`);
+                        this.logger.info({ rules: ws_message.rules }, `rule_received_from_client_ws`);
                         const query_type = ws_message.type;
                         if (query_type === 'historical+live' || query_type === 'live') {
                             this.logger.info({}, `query_preprocessing_started`);
                             const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
+                            const rules = ws_message.rules;
                             this.set_connections(query_hashed, connection);
                             if (await this.if_authenticated()) {
                                 if (await this.if_authorized(ldes_query)) {
-                                    this.process_query(ldes_query, width, query_type, this.event_emitter, this.logger);
+                                    this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
                                 }
                             }
                         }
@@ -246,8 +248,8 @@ export class WebSocketHandler {
      * @param {EventEmitter} event_emitter - The event emitter object.
      * @memberof WebSocketHandler
      */
-    public process_query(query: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any) {
-        QueryHandler.handle_ws_query(query, width, this.query_registry, this.logger, this.connections, query_type, event_emitter);
+    public process_query(query: string, rules: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any) {
+        QueryHandler.handle_ws_query(query, rules, width, this.query_registry, this.logger, this.connections, query_type, event_emitter);
     }
 
     /**

@@ -114,3 +114,4 @@ componentsjs-error-state.json
 scratch/
 .internal/
 .vscode/
+*.log
