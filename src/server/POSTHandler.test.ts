@@ -1,5 +1,5 @@
 import { QueryHandler } from './QueryHandler';
-import { QueryRegistry } from '../service/query-registry/QueryRegistry';
+import { AuditLoggedQueryService } from '../service/query-registry/AuditLoggedQueryService';
 describe('QueryHandler', () => {
   describe('handle', () => {
     
@@ -11,7 +11,7 @@ describe('QueryHandler', () => {
       const query = 'SELECT * WHERE { ?s ?p ?o }';
 const rules = '';      
       const width = 10;
-      const query_registry = {} as QueryRegistry;
+      const query_registry = {} as AuditLoggedQueryService;
       const logger = console;
       const websocket_connections = new Map();
 

@@ -1,7 +1,7 @@
 {
-    "name": "solid-stream-aggregator",
+    "name": "privacy-preserved-healthcare-stream-monitoring",
     "version": "1.0.0",
-    "description": "Aggregation on top of streams generated from a Solid Pod",
+    "description": "A privacy preserved healthcare stream monitoring from Solid Pod(s) for anomaly detection",
     "main": "dist/index.js",
     "scripts": {
         "build": "npx tsc",
@@ -26,6 +26,8 @@
         "@eslint/js": "^9.19.0",
         "@types/bunyan": "^1.8.11",
         "@types/jest": "^29.5.12",
+        "@types/jsonwebtoken": "^9.0.9",
+        "@types/node-fetch": "^2.6.12",
         "@types/pidusage": "^2.0.5",
         "@types/websocket": "^1.0.6",
         "@typescript-eslint/parser": "^6.21.0",
@@ -47,6 +49,8 @@
         "bunyan": "^1.8.15",
         "css-auth-login": "^1.0.8",
         "eyereasoner": "^18.4.6",
+        "jsonwebtoken": "^9.0.2",
+        "nock": "^14.0.1",
         "pidusage": "^3.0.2",
         "rate-limited-ldp-communication": "^1.0.5",
         "rdflib": "^2.2.31",

@@ -1,10 +1,10 @@
 import { Logger } from "tslog";
-import { QueryRegistry } from "./QueryRegistry";
+import { AuditLoggedQueryService } from "./AuditLoggedQueryService";
 
-describe('QueryRegistry', () => {
-    let query_registry: QueryRegistry;
+describe('AuditLoggedQueryService', () => {
+    let query_registry: AuditLoggedQueryService;
     beforeAll(() => {
-        query_registry = new QueryRegistry();
+        query_registry = new AuditLoggedQueryService();
     })
     const logger = new Logger();
     const rspql_query = `
@@ -22,8 +22,8 @@ describe('QueryRegistry', () => {
     }
 `;
 
-    it('initializing the QueryRegistry', () => {
-        expect(query_registry).toBeInstanceOf(QueryRegistry);
+    it('initializing the AuditLoggedQueryService', () => {
+        expect(query_registry).toBeInstanceOf(AuditLoggedQueryService);
     });
     it(`adding a query to the registry`, async () => {
         expect(await query_registry.add_query_in_registry(rspql_query, logger)).toBe(true);
@@ -152,7 +152,7 @@ describe('QueryRegistry', () => {
             }
         }
         `;
-        await query_registry.add_query_in_registry(query_one, logger);        
+        await query_registry.add_query_in_registry(query_one, logger);
         expect(query_registry.checkUniqueQuery(query_one, logger)).toBe(true);
     });
 });

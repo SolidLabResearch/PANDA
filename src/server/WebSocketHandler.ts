@@ -6,7 +6,7 @@ import { LDESPublisher } from "../service/publishing-stream-to-pod/LDESPublisher
 import { find_relevant_streams, hash_string_md5 } from "../utils/Util";
 import { QueryHandler } from "./QueryHandler";
 import { RSPQLParser } from "../service/parsers/RSPQLParser";
-import { QueryRegistry } from "../service/query-registry/QueryRegistry";
+import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
 import { AggregationFocusExtractor } from "../service/parsers/AggregationFocusExtractor";
 import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
 import { accessResource } from "../service/authorization/AccessResource";
@@ -27,7 +27,7 @@ export class WebSocketHandler {
     public event_emitter: EventEmitter;
     public aggregation_publisher: LDESPublisher;
     public logger: any;
-    private query_registry: QueryRegistry;
+    private query_registry: AuditLoggedQueryService;
     /**
      * Creates an instance of WebSocketHandler.
      * @param {WebSocket.server} websocket_server - The Websocket server.
@@ -44,7 +44,7 @@ export class WebSocketHandler {
         this.aggregation_publisher = aggregation_publisher;
         this.connections = new Map<string, WebSocket[]>();
         this.parser = new RSPQLParser();
-        this.query_registry = new QueryRegistry();
+        this.query_registry = new AuditLoggedQueryService();
         this.n3_parser = new Parser({ format: 'N-Triples' });
         this.logger.info({}, 'websocket_handler_initialized');
     }
@@ -306,49 +306,6 @@ export class WebSocketHandler {
     }
 
     public async if_authorized(query: string): Promise<boolean> {
-        const healthcare_patient_policy =
-            `PREFIX dcterms: <http://purl.org/dc/terms/>
-PREFIX eu-gdpr: <https://w3id.org/dpv/legal/eu/gdpr#>
-PREFIX oac: <https://w3id.org/oac#>
-PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-
-PREFIX ex: <http://example.org/>
-
-<http://example.org/HCPX-request> a odrl:Request ;
-  odrl:uid ex:HCPX-request ;
-  odrl:profile oac: ;
-  dcterms:description "HCP X requests to read Alice's health data for bariatric care.";
-  odrl:permission <http://example.org/HCPX-request-permission> .
-
-<http://example.org/HCPX-request-permission> a odrl:Permission ;
-  odrl:action odrl:read ;
-  odrl:target <http://localhost:3000/ruben/medical/aggregation-x/> ;
-  odrl:assigner <http://localhost:3000/ruben/profile/card#me> ;
-  odrl:assignee <http://localhost:3000/alice/profile/card#me> ;
-  odrl:constraint <http://example.org/HCPX-request-permission-purpose>,
-      <http://example.org/HCPX-request-permission-lb> .
-
-<http://example.org/HCPX-request-permission-purpose> a odrl:Constraint ;
-  odrl:leftOperand odrl:purpose ; # can also be oac:Purpose, to conform with OAC profile
-  odrl:operator odrl:eq ;
-  odrl:rightOperand ex:aggregation .
-
-<http://example.org/HCPX-request-permission-lb> a odrl:Constraint ;
-  odrl:leftOperand oac:LegalBasis ;
-  odrl:operator odrl:eq ;
-  odrl:rightOperand eu-gdpr:A9-2-a .`;
-        return accessResource('http://localhost:3000/ruben/profile/card#me', 'http://localhost:3000/ruben/medical/aggregation-x/', 'http://localhost:3000/alice/profile/card#me', healthcare_patient_policy, 'http://localhost:3000/ruben/settings/policies/')
-        // const parsed = this.parser.parse(query);
-        // const pod_url = parsed.s2r[0].stream_name;
-        // console.log(`Checking if the user is authorized to access the stream: ${pod_url}`);
-
-        // // const streams = await find_relevant_streams(pod_url, 'author');
-        // // if (streams.length > 0) {
-        // //     return true;
-        // // }
-        // // else {
-        // //     return false;
-        // // }
+        return true;
     }
 }

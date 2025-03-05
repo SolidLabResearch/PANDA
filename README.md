@@ -1,4 +1,4 @@
-# Privacy Enabled Streaming Service for a Dashboard
+# Privacy Preserved Healthcare Stream Monitoring
 
 The repository contains the code for the Privacy Enabled Streaming Service for a Dashboard. The streaming service enables query processing and reasoning over the streams.
 

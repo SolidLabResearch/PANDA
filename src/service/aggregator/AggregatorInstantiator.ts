@@ -7,8 +7,9 @@ import * as CREDENTIALS from '../../config/PodToken.json';
 import { BindingsWithTimestamp } from "../../utils/Types";
 import { hash_string_md5 } from "../../utils/Util";
 import { Credentials, aggregation_object } from "../../utils/Types";
+import { DataFactory, Parser } from "n3";
 import { NotificationStreamProcessor } from "./NotificationStreamProcessor";
-import { N3ReasonerService } from "../reasoner/N3Reasoner";
+import { ContinuousAnomalyMonitoringService } from "../reasoner/ContinuousAnomalyMonitoringService";
 const WebSocketClient = require('websocket').client;
 const websocketConnection = require('websocket').connection;
 const parser = new RSPQLParser();
@@ -116,20 +117,87 @@ export class AggregatorInstantiator {
                     const aggregation_event_timestamp = new Date().getTime();
                     const data = item.value;
                     const aggregation_event = this.generate_aggregation_event(data, aggregation_event_timestamp, this.stream_array, window_timestamp_from, window_timestamp_to);
-                    const reasoner = new N3ReasonerService(this.rules);
-                    const reasoned_result = await reasoner.reason(aggregation_event);
-                    const aggregation_object: aggregation_object = {
-                        query_hash: this.hash_string,
-                        aggregation_event: reasoned_result,
-                        aggregation_window_from: this.from_date,
-                        aggregation_window_to: this.to_date,
-                    };
-                    const aggregation_object_string = JSON.stringify(aggregation_object);
-                    this.sendToServer(aggregation_object_string);
-                    this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
+                    if (this.rules = '') {
+                        const fetched_rules = await this.fetch_rules_from_query(this.query);
+                        if (fetched_rules) {
+                            const reasoner = new ContinuousAnomalyMonitoringService(fetched_rules);
+                            const reasoned_result = await reasoner.reason(aggregation_event);
+                            const aggregation_object: aggregation_object = {
+                                query_hash: this.hash_string,
+                                aggregation_event: reasoned_result,
+                                aggregation_window_from: this.from_date,
+                                aggregation_window_to: this.to_date,
+                            };
+                            const aggregation_object_string = JSON.stringify(aggregation_object);
+                            this.sendToServer(aggregation_object_string);
+                            this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
+                        }
+                        else {
+                            throw new Error("The rules could not be fetched from the Solid Pod.");
+                        }
+                    }
+                    else {
+                        const reasoner = new ContinuousAnomalyMonitoringService(this.rules);
+                        const reasoned_result = await reasoner.reason(aggregation_event);
+                        const aggregation_object: aggregation_object = {
+                            query_hash: this.hash_string,
+                            aggregation_event: reasoned_result,
+                            aggregation_window_from: this.from_date,
+                            aggregation_window_to: this.to_date,
+                        };
+                        const aggregation_object_string = JSON.stringify(aggregation_object);
+                        this.sendToServer(aggregation_object_string);
+                        this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
+                    }
+
                 }
             })
         });
+    }
+
+    async fetch_rules_from_query(rsp_ql_query: string): Promise<string | undefined> {
+        const stream_match_regex = /<([^>]+)>/;
+        const stream_match = rsp_ql_query.match(stream_match_regex);
+        if (stream_match !== null) {
+            const stream = stream_match[1];
+            const webID = stream.replace(/\/[^/]+$/, '/profile/card#me');
+            const response = await fetch(webID, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'text/turtle,text/n3;q=0.9',
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error("The response from the Solid Pod is not OK. It failed to fetch the profile document.");
+            }
+
+            const webIDTurtle = await response.text();
+            const parser = new Parser();
+            const triples = parser.parse(webIDTurtle);
+
+            for (const triple of triples) {
+                if (triple.predicate.value === 'http://example.org/hasRuleLocation') {
+                    const rule_location = triple.object.value;
+                    const rule_response = await fetch(rule_location, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'text/turtle,text/n3;q=0.9',
+                        }
+                    });
+
+                    if (!rule_response.ok) {
+                        throw new Error("The response from the Solid Pod is not OK. It failed to fetch the rule document.");
+                    }
+                    const n3_rules = await rule_response.text();
+                    return n3_rules;
+                }
+            }
+        }
+        else {
+            throw new Error("The stream match is null.");
+            return undefined;
+        }
     }
 
     // TODO : add extra projection variables to the aggregation event.

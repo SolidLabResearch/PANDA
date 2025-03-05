@@ -7,10 +7,10 @@ import { hash_string_md5 } from "../../utils/Util";
 const websocketConnection = require('websocket').connection;
 const WebSocketClient = require('websocket').client;
 /**
- * The QueryRegistry class is responsible for registering, executing and storing the queries.
- * @class QueryRegistry
+ * The AuditLoggedQueryService class is responsible for registering, executing and storing the queries.
+ * @class AuditLoggedQueryService
  */
-export class QueryRegistry {
+export class AuditLoggedQueryService {
     registered_queries: WriteLockArray<string>;
     executed_queries: WriteLockArray<string>;
     future_queries: string[];
@@ -23,16 +23,16 @@ export class QueryRegistry {
     public static client: any = new WebSocketClient();
 
     /**
-     * Creates an instance of QueryRegistry.
-     * @memberof QueryRegistry
+     * Creates an instance of AuditLoggedQueryService.
+     * @memberof AuditLoggedQueryService
      */
     constructor() {
         /**
-         * Map of registered queries which are the queries without any analysis by the QueryRegistry but only registered.  
+         * Map of registered queries which are the queries without any analysis by the AuditLoggedQueryService but only registered.  
          */
         this.registered_queries = new WriteLockArray<string>();
         /**
-         * Array of executing queries which were unique as compared to all the existing queries in the QueryRegistry. 
+         * Array of executing queries which were unique as compared to all the existing queries in the AuditLoggedQueryService. 
          */
         this.executing_queries = new WriteLockArray<string>();
         this.executed_queries = new WriteLockArray<string>();
@@ -43,24 +43,25 @@ export class QueryRegistry {
         this.logger = new Logger();
     }
     /**
-     *  Register a query in the QueryRegistry.
+     *  Register a query in the AuditLoggedQueryService.
      * @param {string} rspql_query - The RSPQL query to be registered.
-     * @param {QueryRegistry} query_registry - The QueryRegistry object.
+     * @param {AuditLoggedQueryService} query_registry - The AuditLoggedQueryService object.
      * @param {number} from_timestamp - The timestamp from where the query is to be executed.
      * @param {number} to_timestamp - The timestamp to where the query is to be executed.
      * @param {any} logger - The logger object.
      * @param {string} query_type - The type of the query (either 'historical+live' or just 'live').
      * @param {any} event_emitter - The event emitter object.
      * @returns {Promise<boolean>} - Returns true if the query is unique, otherwise false.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
-    async register_query(rspql_query: string, rules: string, query_registry: QueryRegistry, from_timestamp: number, to_timestamp: number, logger: any, query_type: any, event_emitter: any): Promise<boolean> {
+    async register_query(rspql_query: string, rules: string, query_registry: AuditLoggedQueryService, from_timestamp: number, to_timestamp: number, logger: any, query_type: any, event_emitter: any): Promise<boolean> {
         if (await query_registry.add_query_in_registry(rspql_query, logger)) {
             /*
             The query is not already executing or computed ; it is unique. So, just compute it and send it via the websocket.
             */
             logger.info({}, 'query_is_unique');
             new AggregatorInstantiator(rspql_query, rules, from_timestamp, to_timestamp, logger, query_type, event_emitter);
+            this.auditQueryLog();
             return true;
         }
         else {
@@ -79,7 +80,7 @@ export class QueryRegistry {
      * @param {string} rspql_query - The RSPQL query to be added.
      * @param {any} logger - The logger object.
      * @returns {Promise<boolean>} - Returns true if the query is unique, otherwise false.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     async add_query_in_registry(rspql_query: string, logger: any): Promise<boolean> {
         await this.registered_queries.addItem(rspql_query);
@@ -102,7 +103,7 @@ export class QueryRegistry {
      * Add a query to the executing queries.
      * @param {string} query - The query to be added.
      * @returns {Promise<void>} - Returns nothing.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     async add_to_executing_queries(query: string): Promise<void> {
         this.executing_queries.addItem(query);
@@ -113,7 +114,7 @@ export class QueryRegistry {
      * @param {string} query - The query to be checked.
      * @param {any} logger - The logger object.
      * @returns {boolean} - Returns true if the query is unique, otherwise false.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     checkUniqueQuery(query: string, logger: any): boolean {
         const query_hashed = hash_string_md5(query);
@@ -134,7 +135,7 @@ export class QueryRegistry {
     /**
      * Get the query registry length.
      * @returns {number} - The length of the query registry.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     get_query_registry_length() {
         return this.registered_queries.get_length();
@@ -143,7 +144,7 @@ export class QueryRegistry {
     /**
      * Delete all the queries from the registry.
      * @returns {boolean} - Returns true if the queries are deleted, otherwise false.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     public delete_all_queries_from_the_registry() {
         this.registered_queries.delete_all_items();
@@ -158,10 +159,14 @@ export class QueryRegistry {
         }
     }
 
+    public auditQueryLog() {
+
+    }
+
     /**
      * Get the executing queries.
      * @returns {WriteLockArray<string>} - The executing queries.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     get_executing_queries() {
         return this.executing_queries;
@@ -171,7 +176,7 @@ export class QueryRegistry {
     /** 
      * Get the registered queries.
      * @returns {WriteLockArray<string>} - The registered queries.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     get_registered_queries() {
         return this.registered_queries;
@@ -182,7 +187,7 @@ export class QueryRegistry {
      * Send a message to the server.
      * @static
      * @param {string} message - The message to be sent.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     static send_to_server(message: string) {
         if (this.connection.connected) {
@@ -199,12 +204,12 @@ export class QueryRegistry {
      * Connect with the Websocket server.
      * @static
      * @param {string} websocketURL - The URL of the websocket server.
-     * @memberof QueryRegistry
+     * @memberof AuditLoggedQueryService
      */
     static async connect_with_server(websocketURL: string) {
         this.client.connect(websocketURL, 'solid-stream-aggregator-protocol');
         this.client.on('connect', (connection: typeof websocketConnection) => {
-            QueryRegistry.connection = connection;
+            AuditLoggedQueryService.connection = connection;
         });
         this.client.setMaxListeners(Infinity);
         this.client.on('connectFailed', (error: any) => {

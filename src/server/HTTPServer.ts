@@ -1,7 +1,7 @@
 import { createServer, ServerResponse, IncomingMessage, Server } from "http";
 import { GETHandler } from "./GETHandler";
 import { LDESPublisher } from "../service/publishing-stream-to-pod/LDESPublisher";
-import { QueryRegistry } from "../service/query-registry/QueryRegistry";
+import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
 import { WebSocketHandler } from "./WebSocketHandler";
 import * as websocket from 'websocket';
 const EventEmitter = require('events');
@@ -38,7 +38,7 @@ export class HTTPServer {
         this.http_server.keepAliveTimeout = 6000;
         this.aggregation_publisher = new LDESPublisher();
         this.event_emitter = new EventEmitter();
-        this.query_registry = new QueryRegistry();
+        this.query_registry = new AuditLoggedQueryService();
         this.websocket_handler = new WebSocketHandler(this.websocket_server, this.event_emitter, this.aggregation_publisher, this.logger);
         this.websocket_handler.handle_wss();
         this.websocket_handler.aggregation_event_publisher();

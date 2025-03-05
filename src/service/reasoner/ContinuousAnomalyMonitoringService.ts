@@ -2,8 +2,7 @@ import { storeToString } from "@treecg/ldes-snapshot";
 import { n3reasoner, runQuery, SwiplEye } from "eyereasoner";
 const N3 = require('n3');
 
-export class N3ReasonerService {
-
+export class ContinuousAnomalyMonitoringService {
     public n3_rules: string
     constructor(rules: string) {
         this.n3_rules = rules;

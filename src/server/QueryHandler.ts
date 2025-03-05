@@ -1,5 +1,5 @@
 import { storeToString } from "@treecg/versionawareldesinldp";
-import { QueryRegistry } from "../service/query-registry/QueryRegistry";
+import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
 import { AggregationDispatcher } from "../service/result-dispatcher/AggregationDispatcher";
 import { RequestBody } from "../utils/Types";
 import { hash_string_md5 } from "../utils/Util";
@@ -25,21 +25,21 @@ export class QueryHandler {
 
     /**
      * Handle the Websocket query from the client.
-     * It checks if the query is unique and if it is, then it registers the query in the QueryRegistry and if it is not, then it sends the aggregated events to the client.
-     * The non unique query is the query that is already registered in the QueryRegistry, and it uses the Function Ontology Description from the Solid Stream Aggregator's Solid Pod
+     * It checks if the query is unique and if it is, then it registers the query in the AuditLoggedQueryService and if it is not, then it sends the aggregated events to the client.
+     * The non unique query is the query that is already registered in the AuditLoggedQueryService, and it uses the Function Ontology Description from the Solid Stream Aggregator's Solid Pod
      * To get the aggregated events and send them to the client.
      * @static
      * @param {string} query - The query to be handled (in RSPQL).
      * @param {string} rules - The rules.
      * @param {number} width - The width of the window.
-     * @param {QueryRegistry} query_registry - The QueryRegistry object.
+     * @param {AuditLoggedQueryService} query_registry - The AuditLoggedQueryService object.
      * @param {*} logger - The logger object.
      * @param {any} websocket_connections - The Websocket connections.
      * @param {string} query_type - The type of the query (either historical+live or live).
      * @param {any} event_emitter - The event emitter object.
      * @memberof QueryHandler
      */
-    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: QueryRegistry, logger: any, websocket_connections: any, query_type: string, event_emitter: any) {
+    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any) {
         const aggregation_dispatcher = new AggregationDispatcher(query);
         let to_timestamp = new Date().getTime(); // current time
         const from_timestamp = new Date(to_timestamp - (width)).getTime(); // latest seconds ago

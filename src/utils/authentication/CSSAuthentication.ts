@@ -83,7 +83,7 @@ export async function generateToken(options: any) {
  * @param {Function} [fetch] - Optional fetch function to authenticate. Defaults to built-in fetch function.
  * @returns {Function} - The authenticated fetch function.
  */
-async function makeAuthenticatedFetch(credentials: any, fetch: any) {
+export async function makeAuthenticatedFetch(credentials: any, fetch: any) {
     const authFetch = await createAuthenticatedFetchFunction(credentials, fetch);
     return authFetch
 }
