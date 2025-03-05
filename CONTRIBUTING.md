@@ -32,7 +32,7 @@
 
 ## License
 
-- Contributions are subject to the project's [license](https://github.com/SolidLabResearch/solid-stream-aggregator/blob/master/LICENCE.md).
+- Contributions are subject to the project's [license](./LICENCE.md).
 - Make sure you agree to the license terms before contributing.
 
 Thank you for contributing!

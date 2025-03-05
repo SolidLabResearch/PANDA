@@ -53,12 +53,12 @@ const program = require('commander');
 
 program
     .version('0.0.1')
-    .description('Aggregating LDES streams from a Solid Pod.')
-    .name('solid-stream-aggregator')
+    .description('A privacy preserved healthcare stream monitoring from Solid Pod(s) for anomaly detection')
+    .name('privacy-preserved-healthcare-stream-monitoring')
 
 program
-    .command('aggregation')
-    .description('Starting the aggregation service.')
+    .command('monitoring')
+    .description('Starting the privacy preserved healthcare stream monitoring system service.')
     .option(
         '-p, --port <port>',
         'The port of the REST HTTP server',
@@ -66,7 +66,7 @@ program
     )
     .option(
         '-ss --solid_server_url <SolidServer>',
-        'The URL of the Solid Pod server where the LDES streams are stored in a Solid Pod',
+        'The URL of the Solid Pod server where the streams are stored in a Solid Pod',
         'http://localhost:3000/'
     )
     .action(async (options: any) => {

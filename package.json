@@ -6,8 +6,8 @@
     "scripts": {
         "build": "npx tsc",
         "start": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js ",
-        "start-aggregation": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js aggregation",
-        "start-log": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js aggregation > logs/output.log",
+        "start-monitoring": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js monitoring",
+        "start-log": "npx tsc && cp -r ./src/static ./dist && node --max-old-space-size=8192 dist/index.js monitoring > logs/output.log",
         "docs": "esdoc",
         "test": "jest --coverage",
         "test:watch": "jest --watch",
