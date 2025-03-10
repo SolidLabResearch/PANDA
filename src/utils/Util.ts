@@ -1,8 +1,11 @@
 import { createHash } from 'crypto'
+import { TokenManager } from '../service/authorization/TokenManager';
 const { exec } = require('child_process');
 const ldfetch = require('ldfetch');
 const ld_fetch = new ldfetch({});
 const N3 = require('n3');
+const token_manager = new TokenManager();
+const { access_token, token_type } = token_manager.getAccessToken()
 
 /**
  * Hash a string using the MD5 algorithm.
@@ -128,7 +131,11 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
     if (await if_exists_relevant_streams(solid_pod_url, interest_metrics)) {
         try {
             const public_type_index = await find_public_type_index(solid_pod_url);      
-            const response = await ld_fetch.get(public_type_index);            
+            const response = await ld_fetch.get(public_type_index, {
+                Headers: {
+                    'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
+                }
+            });            
             const store = new N3.Store(await response.triples);
             for (const quad of store) {
                 if (quad.predicate.value == "https://w3id.org/tree#view") {
@@ -157,7 +164,11 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
 export async function if_exists_relevant_streams(solid_pod_url: string, interest_metrics: string[]): Promise<boolean> {
     try {
         const public_type_index = await find_public_type_index(solid_pod_url);
-        const response = await ld_fetch.get(public_type_index);
+        const response = await ld_fetch.get(public_type_index, {
+            Headers: {
+                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
+            }
+        });
         const store = new N3.Store(await response.triples);
         for (const quad of store) {
             if (quad.predicate.value == "https://saref.etsi.org/core/relatesToProperty") {
@@ -182,7 +193,11 @@ export async function if_exists_relevant_streams(solid_pod_url: string, interest
 export async function find_public_type_index(solid_pod_url: string): Promise<string> {
     const profile_document = solid_pod_url + "profile/card";    
     try {
-        const response = await ld_fetch.get(profile_document);
+        const response = await ld_fetch.get(profile_document, {
+            Headers: {
+                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
+            }
+        });
         const store = new N3.Store(await response.triples);
         for (const quad of store) {            
             if (quad.predicate.value == "http://www.w3.org/ns/solid/terms#publicTypeIndex") {

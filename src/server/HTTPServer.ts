@@ -5,6 +5,9 @@ import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQu
 import { WebSocketHandler } from "./WebSocketHandler";
 import * as websocket from 'websocket';
 const EventEmitter = require('events');
+import { TokenManager } from "../service/authorization/TokenManager";
+const token_manager = new TokenManager();
+const { access_token, token_type } = token_manager.getAccessToken()
 /**
  * Class for the HTTP Server.
  * @class HTTPServer
@@ -80,6 +83,7 @@ export class HTTPServer {
                         const latest_event_response = await fetch(added_event_location, {
                             method: 'GET',
                             headers: {
+                                'Authorization': `${token_type} ${access_token}`, // Add the access token to the headers.
                                 'Accept': 'text/turtle'
                             }
                         });

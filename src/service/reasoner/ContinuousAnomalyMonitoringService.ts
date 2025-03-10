@@ -33,7 +33,6 @@ export class ContinuousAnomalyMonitoringService {
             store.addQuad(elem);
         }
         
-
         const inferredStore = new N3.Store(await n3reasoner(store.getQuads(), undefined, {
             output: 'derivations',
             outputType: 'quads',

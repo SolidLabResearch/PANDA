@@ -1,12 +1,13 @@
-import { makeAuthenticatedFetch } from "../utils/authentication/CSSAuthentication";
+import { makeAuthenticatedFetch } from "../../utils/authentication/CSSAuthentication";
 import fetch from 'node-fetch';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
+import { TokenManager } from "./TokenManager";
 
 export class AccessControlService {
-    
     public requesting_user: string;
     public patient_webID: string
+    public token_manager: any;
     public requested_resource: string;
     public terms = {
         solid: {
@@ -25,6 +26,7 @@ export class AccessControlService {
         this.patient_webID = patient_webID;
         this.requested_resource = requested_resource;
         this.requesting_user = requesting_user;
+        this.token_manager = new TokenManager();
     }
 
     public addAuthenticationToken(user_webId: string, token: string) {
@@ -60,14 +62,13 @@ export class AccessControlService {
             }
         });
         const umaHeader = await fetch_response.headers.get('WWW-Authenticate');
-        console.log(`The resource request is done without any authorization with the UMA flow. It should result in a 403 response with an ${umaHeader} header.`);
+        console.log(`The resource request is done without any authorization with the UMA flow. It should result in a 401 response with an ${umaHeader} header.`);
         let authorization_server_uri = umaHeader?.split('as_uri=')[1].split('"')[1];
         let authorization_ticket = umaHeader?.split('ticket=')[1].replace(/"/g, '');
         console.log(`The authorization server URI is ${authorization_server_uri} and the ticket is ${authorization_ticket}.`);
         if (!authorization_server_uri) {
             throw new Error(`authorization_server_uri is missing. Parsed from header: ${umaHeader}`);
         }
-
         let authorization_server_uma_config = await (await fetch(`${authorization_server_uri}/.well-known/uma2-configuration`)).json();
         const token_endpoint = authorization_server_uma_config.token_endpoint;
 
@@ -108,6 +109,7 @@ export class AccessControlService {
             });
 
             if (accessWithTokenResponse.status === 200) {
+                this.token_manager.setAccessToken(tokenParameters.access_token, tokenParameters.token_type);
                 console.log(`The request is successful and the monitoring service is authorized to access the resource.`);
                 return true;
             }
@@ -140,7 +142,6 @@ export class AccessControlService {
         };
         return accessRequestWithoutODRLClaims;
     };
-
 
     generateAccessRequestWithODRLClaims(requesting_user: string, requested_resource: string, authorization_ticket: string | undefined, purposeForAccess: string, legalBasis: string, claim_jwt_token: string) {
         const accessRequestWithODRLClaims = {

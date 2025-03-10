@@ -13,6 +13,9 @@ import { RateLimitedLDPCommunication } from "rate-limited-ldp-communication";
 const { quad, namedNode, literal } = DataFactory;
 const ldfetch = require('ldfetch');
 const fetch = new ldfetch({});
+import { TokenManager } from "../authorization/TokenManager";
+const token_manager = new TokenManager();
+const { access_token, token_type } = token_manager.getAccessToken();
 /**
  * The QueryAnnotationPublishing class is responsible for publishing the generated aggregation events from the RSP Engine with the
  * Function Ontology Metadata to the LDP container in a LDES in LDP fashion to the Solid Pod of the Aggregator. The aggregator's Solid Pod stores the materialized results.
@@ -98,7 +101,11 @@ export class QueryAnnotationPublishing {
         }
         delete bucket_resources["none"];
         await add_resources_with_metadata_to_buckets(bucket_resources, metadata, communication).then(async () => {
-            const response = await fetch.get(ldes_in_ldp_url);
+            const response = await fetch.get(ldes_in_ldp_url, {
+                Headers: {
+                    'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
+                }
+            });
             const current_inbox_store = new Store();
             const store = new Store(response.triples);
             const inbox_timestamp_array: any[] = [];

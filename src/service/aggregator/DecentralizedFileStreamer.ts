@@ -16,6 +16,8 @@ import { TREE } from "@treecg/ldes-snapshot";
 import { Session } from "@inrupt/solid-client-authn-node";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json'
+import { TokenManager } from "../authorization/TokenManager";
+const { access_token, token_type } = new TokenManager().getAccessToken();
 /**
  * Class for streaming the events from the Solid Pod to the RSP Engine by reading the events and converting the events stored into files into a stream.
  * @class DecentralizedFileStreamer
@@ -310,7 +312,8 @@ export class DecentralizedFileStreamer {
             headers: {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             },
             body: JSON.stringify(post_body)
         });
@@ -337,7 +340,8 @@ export class DecentralizedFileStreamer {
             headers: {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Authorization': `${token_type} ${access_token}`
             },
             body: JSON.stringify(post_body)
         });
@@ -381,7 +385,8 @@ export class DecentralizedFileStreamer {
             headers: {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             },
             body: JSON.stringify(post_body)
         })
