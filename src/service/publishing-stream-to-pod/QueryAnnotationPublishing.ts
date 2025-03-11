@@ -14,7 +14,7 @@ const { quad, namedNode, literal } = DataFactory;
 const ldfetch = require('ldfetch');
 const fetch = new ldfetch({});
 import { TokenManager } from "../authorization/TokenManager";
-const token_manager = new TokenManager();
+const token_manager = TokenManager.getInstance();
 const { access_token, token_type } = token_manager.getAccessToken();
 /**
  * The QueryAnnotationPublishing class is responsible for publishing the generated aggregation events from the RSP Engine with the

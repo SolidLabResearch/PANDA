@@ -7,10 +7,13 @@ import { find_relevant_streams, hash_string_md5 } from "../utils/Util";
 import { QueryHandler } from "./QueryHandler";
 import { RSPQLParser } from "../service/parsers/RSPQLParser";
 import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
+import { TokenManager } from "../service/authorization/TokenManager";
 import { AggregationFocusExtractor } from "../service/parsers/AggregationFocusExtractor";
 import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
-import { accessResource } from "../service/authorization/AccessResource";
 import * as AGG_CONFIG from '../config/pod_credentials.json';
+import * as dotenv from 'dotenv';
+import { AccessControlService } from "../service/authorization/AccessControlService";
+dotenv.config();
 
 /**
  * Class for handling the Websocket server.
@@ -23,6 +26,7 @@ export class WebSocketHandler {
     private connections: Map<string, WebSocket[]>;
     private parser: RSPQLParser;
     private n3_parser: Parser;
+    private token_manager: TokenManager;
     public websocket_server: WebSocket.server;
     public event_emitter: EventEmitter;
     public aggregation_publisher: LDESPublisher;
@@ -41,6 +45,7 @@ export class WebSocketHandler {
         this.logger = logger;
         this.websocket_server = websocket_server;
         this.event_emitter = event_emitter;
+        this.token_manager = TokenManager.getInstance();
         this.aggregation_publisher = aggregation_publisher;
         this.connections = new Map<string, WebSocket[]>();
         this.parser = new RSPQLParser();
@@ -79,10 +84,38 @@ export class WebSocketHandler {
                             const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
-                            this.set_connections(query_hashed, connection);
-                            if (await this.if_authenticated()) {
-                                if (await this.if_authorized(ldes_query)) {
-                                    this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
+                            const aggregator_location = process.env.AGGREGATOR_SERVER_LOCATION;
+                            const aggregator_fragment = process.env.AGGREGATOR_SERVER_FRAGMENT;
+                            const aggregator_location_with_fragment = `${aggregator_location}#me`;
+                            const purposeForAccess = process.env.PURPOSE_FOR_ACCESS;
+                            const legalBasis = process.env.LEGAL_BASIS_FOR_ACCESS;
+                            const legalBasisForAccess = `${legalBasis}#A9-2-a`;
+                            const { stream_location, webID } = this.getResourceStreamAndWebIdFromQuery(ldes_query);
+                            console.log(`Aggregator location: ${aggregator_location_with_fragment}`);
+                            console.log(`Stream location: ${stream_location}`);
+                            console.log(`WebID: ${webID}`);
+                            if (aggregator_location !== undefined && purposeForAccess !== undefined && legalBasisForAccess !== undefined) {
+                                const access_control_service = new AccessControlService(aggregator_location_with_fragment, stream_location, webID);
+                                this.set_connections(query_hashed, connection);
+                                if (await this.if_authenticated()) {
+                                    if (await access_control_service.authorizeRequest(purposeForAccess, legalBasisForAccess)) {
+                                        let {access_token, token_type} = this.token_manager.getAccessToken();
+                                        if (access_token && token_type){
+                                            console.log(`Access granted.`);
+                                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
+                                        }
+                                        else {
+                                            console.log(`The access token is not defined eventhough the request is authorized.`);   
+                                        }
+                                    }
+                                    else {
+                                        this.logger.info({ query_id: query_hashed }, `access_denied`);
+                                        connection.send(JSON.stringify({ status: 'Access Denied' }));
+                                    }
+                                }
+                                else {
+                                    this.logger.info({ query_id: query_hashed }, `authentication_failed`);
+                                    connection.send(JSON.stringify({ status: 'Authentication Failed' }));
                                 }
                             }
                         }
@@ -262,9 +295,9 @@ export class WebSocketHandler {
         const parsed = this.parser.parse(query);
         const pod_url = parsed.s2r[0].stream_name;
         const interest_metric = new AggregationFocusExtractor(query).extract_focus();
-        const streams = await find_relevant_streams(pod_url, interest_metric);
-        const ldes_stream = streams[0];
-        const ldes_query = query.replace(pod_url, ldes_stream);
+        // const streams = await find_relevant_streams(pod_url, interest_metric);
+        // const ldes_stream = streams[0];
+        const ldes_query = query.replace(pod_url, pod_url);
         const width = parsed.s2r[0].width;
         const query_hashed = hash_string_md5(ldes_query);
         return { ldes_query, query_hashed, width };
@@ -291,21 +324,33 @@ export class WebSocketHandler {
     }
 
     public async if_authenticated() {
-        const session = await getAuthenticatedSession({
-            webId: AGG_CONFIG.aggregation_pod_web_id,
-            password: AGG_CONFIG.aggregation_pod_password,
-            email: AGG_CONFIG.aggregation_pod_email,
-        })
+        return true;
+        // const session = await getAuthenticatedSession({
+        //     webId: AGG_CONFIG.aggregation_pod_web_id,
+        //     password: AGG_CONFIG.aggregation_pod_password,
+        //     email: AGG_CONFIG.aggregation_pod_email,
+        // })
 
-        if (session) {
-            return true;
+        // if (session) {
+        //     return true;
+        // }
+        // else {
+        //     return false;
+        // }
+    }
+
+    public getResourceStreamAndWebIdFromQuery(rspql_query: string) {
+        const stream_match_regex = /FROM NAMED WINDOW\s+[^ ]+\s+ON STREAM\s+<([^>]+)>/;
+        const stream_match = rspql_query.match(stream_match_regex);
+        
+        if (stream_match !== null) {
+            const stream_location = stream_match[1]; // Extracts the stream URL
+            let webID = stream_location.replace(/\/[^/]+\/?$/, '/profile/card#me');
+            return { stream_location, webID };
         }
         else {
-            return false;
+            throw new Error("The stream is not found in the query.");
         }
     }
-
-    public async if_authorized(query: string): Promise<boolean> {
-        return true;
-    }
+    
 }

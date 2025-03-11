@@ -17,7 +17,7 @@ import { Session } from "@inrupt/solid-client-authn-node";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json'
 import { TokenManager } from "../authorization/TokenManager";
-const { access_token, token_type } = new TokenManager().getAccessToken();
+const { access_token, token_type } = TokenManager.getInstance().getAccessToken();
 /**
  * Class for streaming the events from the Solid Pod to the RSP Engine by reading the events and converting the events stored into files into a stream.
  * @class DecentralizedFileStreamer

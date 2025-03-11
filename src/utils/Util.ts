@@ -4,7 +4,7 @@ const { exec } = require('child_process');
 const ldfetch = require('ldfetch');
 const ld_fetch = new ldfetch({});
 const N3 = require('n3');
-const token_manager = new TokenManager();
+const token_manager = TokenManager.getInstance();
 const { access_token, token_type } = token_manager.getAccessToken()
 
 /**

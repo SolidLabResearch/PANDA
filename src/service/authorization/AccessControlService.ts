@@ -26,7 +26,7 @@ export class AccessControlService {
         this.patient_webID = patient_webID;
         this.requested_resource = requested_resource;
         this.requesting_user = requesting_user;
-        this.token_manager = new TokenManager();
+        this.token_manager = TokenManager.getInstance();
     }
 
     public addAuthenticationToken(user_webId: string, token: string) {
@@ -54,8 +54,8 @@ export class AccessControlService {
         return policy;
     }
 
-    async authorizeRequest(requesting_user: string, requested_resource: string, purposeForAccess: string, legalBasis: string): Promise<boolean> {
-        const fetch_response = await fetch(requested_resource, {
+    async authorizeRequest(purposeForAccess: string, legalBasis: string): Promise<boolean> {
+        const fetch_response = await fetch(this.requested_resource, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
@@ -71,52 +71,33 @@ export class AccessControlService {
         }
         let authorization_server_uma_config = await (await fetch(`${authorization_server_uri}/.well-known/uma2-configuration`)).json();
         const token_endpoint = authorization_server_uma_config.token_endpoint;
+        const claim_jwt_token = this.generateJWTToken(purposeForAccess, this.requesting_user, legalBasis);
+        const accessRequestWithODRLClaims = this.generateAccessRequestWithODRLClaims(this.requesting_user, this.requested_resource, authorization_ticket, purposeForAccess, legalBasis, claim_jwt_token);
 
-        const accessRequestWithoutODRLClaims = this.generateAccessRequestWithoutODRLClaims(requesting_user, requested_resource, authorization_ticket);
-
-        const monitoringServiceNeedInfoResponse = await fetch(token_endpoint, {
+        const monitoringServiceNeedInfoResponseWithClaims = await fetch(token_endpoint, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
             },
-            body: JSON.stringify(accessRequestWithoutODRLClaims)
+            body: JSON.stringify(accessRequestWithODRLClaims)
         });
 
-        if (monitoringServiceNeedInfoResponse.status !== 403) {
+        const tokenParameters = await monitoringServiceNeedInfoResponseWithClaims.json();
+
+        const accessWithTokenResponse = await fetch(this.requested_resource, {
+            headers: {
+                'Authorization': `${tokenParameters.token_type} ${tokenParameters.access_token}`
+            }
+        });
+
+        if (accessWithTokenResponse.status === 200) {
+            this.token_manager.setAccessToken(tokenParameters.access_token, tokenParameters.token_type);
             console.log(`The request is successful and the monitoring service is authorized to access the resource.`);
             return true;
         }
-
         else {
-            const { ticket: authorization_ticket_updated, required_claims: monitoringServiceClaims } = await monitoringServiceNeedInfoResponse.json();
-            authorization_ticket = authorization_ticket_updated;
-            const claim_jwt_token = this.generateJWTToken(purposeForAccess, requesting_user, legalBasis);
-            const accessRequestWithODRLClaims = this.generateAccessRequestWithODRLClaims(requesting_user, requested_resource, authorization_ticket, purposeForAccess, legalBasis, claim_jwt_token);
-            const monitoringServiceNeedInfoResponseWithClaims = await fetch(token_endpoint, {
-                method: 'POST',
-                headers: {
-                    'content-type': 'application/json',
-                },
-                body: JSON.stringify(accessRequestWithODRLClaims)
-            });
-
-            const tokenParameters = await monitoringServiceNeedInfoResponseWithClaims.json();
-
-            const accessWithTokenResponse = await fetch(requested_resource, {
-                headers: {
-                    'Authorization': `${tokenParameters.token_type} ${tokenParameters.access_token}`
-                }
-            });
-
-            if (accessWithTokenResponse.status === 200) {
-                this.token_manager.setAccessToken(tokenParameters.access_token, tokenParameters.token_type);
-                console.log(`The request is successful and the monitoring service is authorized to access the resource.`);
-                return true;
-            }
-            else {
-                console.log(`The request is unsuccessful and the monitoring service is not authorized to access the resource.`);
-                return false;
-            }
+            console.log(`The request is unsuccessful and the monitoring service is not authorized to access the resource.`);
+            return false;
         }
     }
 
@@ -140,6 +121,8 @@ export class AccessControlService {
             grant_type: "urn:ietf:params:oauth:grant-type:uma-ticket",
             ticket: authorization_ticket
         };
+        console.log(`The access request without ODRL claims is ${JSON.stringify(accessRequestWithoutODRLClaims)}`);
+
         return accessRequestWithoutODRLClaims;
     };
 
@@ -154,6 +137,7 @@ export class AccessControlService {
                 "@type": "Permission",
                 "@id": `http://example.org/monitoring-request-permission/${randomUUID()}`,
                 target: requested_resource,
+                action: {"@id": "https://w3id.org/oac#read"},
                 assigner: this.patient_webID,
                 assignee: requesting_user,
                 constraint: [
@@ -162,14 +146,14 @@ export class AccessControlService {
                         "@id": `http://example.org/monitoring-request-permission-purpose/${randomUUID()}`,
                         leftOperand: "purpose",
                         operator: "eq",
-                        rightOperand: `${purposeForAccess}`,
+                        rightOperand: { "@id": `${purposeForAccess}` },
                     },
                     {
                         "@type": "Constraint",
                         "@id": `http://example.org/monitoring-request-permission-purpose/${randomUUID()}`,
                         leftOperand: { "@id": "https://w3id.org/oac#LegalBasis" },
                         operator: "eq",
-                        rightOperand: `${legalBasis}`,
+                        rightOperand: { "@id": `${legalBasis}` },
                     }
                 ],
             }],

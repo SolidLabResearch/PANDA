@@ -4,16 +4,33 @@ import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json';
 const N3 = require('n3');
 const parser = new N3.Parser();
 import { TokenManager } from '../../service/authorization/TokenManager';
-const token_manager = new TokenManager();
-const { access_token, token_type } = token_manager.getAccessToken()
+const token_manager = TokenManager.getInstance();
 /**
  * Extracts the subscription server from the given resource.
  * @param {string} resource - The resource which you want to read the notifications from.
  * @returns {Promise<SubscriptionServerNotification | undefined>} - A promise which returns the subscription server or if not returns undefined.
  */
 export async function extract_subscription_server(resource: string): Promise<SubscriptionServerNotification | undefined> {
+    /**
+    * Hardcoding now. 
+    * Note to self that for notification protocol you need to have authorization to read the subscription server.
+    */
+    const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
+    const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+    const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+
+    const subscription_response: SubscriptionServerNotification = {
+        location: subscription_server,
+        channelType: subscription_type,
+        channelLocation: channelLocation
+    }
+    return subscription_response;
+
     const store = new N3.Store();
     try {
+        const { access_token, token_type } = token_manager.getAccessToken();
+        console.log(access_token, token_type);
+        
         const response = await axios.head(resource, {
             headers: {
                 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
@@ -33,9 +50,16 @@ export async function extract_subscription_server(resource: string): Promise<Sub
                             store.addQuad(quad);
                         }
                     });
-                    const subscription_server = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#subscription', null)[0].object.value;
-                    const subscription_type = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].object.value;
-                    const channelLocation = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].subject.value;
+                    /**
+                     * Hardcoding now. 
+                     * Note to self that for notification protocol you need to have authorization to read the subscription server.
+                     */
+                    const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
+                    const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+                    const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+                    // const subscription_server = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#subscription', null)[0].object.value;
+                    // const subscription_type = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].object.value;
+                    // const channelLocation = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].subject.value;
                     const subscription_response: SubscriptionServerNotification = {
                         location: subscription_server,
                         channelType: subscription_type,
@@ -59,14 +83,17 @@ export async function extract_subscription_server(resource: string): Promise<Sub
  * @returns {Promise<string>} - A promise which returns the inbox location.
  */
 export async function extract_ldp_inbox(ldes_stream_location: string) {
+    console.log(ldes_stream_location);
+    
     const store = new N3.Store();
     try {
+        const { access_token, token_type } = token_manager.getAccessToken();
         const response = await fetch(ldes_stream_location, {
             headers: {
                 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             }
         });
-        if (response) {
+        if (response) {            
             await parser.parse(await response.text(), (error: any, quad: any) => {
                 if (error) {
                     console.error(error);
@@ -102,6 +129,7 @@ export async function create_subscription(subscription_server: string, inbox_loc
             "topic": `${inbox_location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
         }
+        const { access_token, token_type } = token_manager.getAccessToken()
         const response = await fetch(subscription_server, {
             method: 'POST',
             headers: {

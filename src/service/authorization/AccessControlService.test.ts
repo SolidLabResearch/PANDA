@@ -11,7 +11,7 @@ describe(`AccessControlService`, () => {
         let access_control_service = new AccessControlService(requesting_user, requested_resource, patient_webID);
         let purposeForAccess = `http://example.org/aggregation`;
         let legalBasis = `https://w3id.org/dpv/legal/eu/gdpr#A9-2-a`;
-        let result = await access_control_service.authorizeRequest(requesting_user, requested_resource, purposeForAccess, legalBasis);
+        let result = await access_control_service.authorizeRequest(purposeForAccess, legalBasis);
         console.log(result);
     }); 
 

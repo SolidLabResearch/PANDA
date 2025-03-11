@@ -48,6 +48,7 @@
         "@types/axios": "^0.14.0",
         "bunyan": "^1.8.15",
         "css-auth-login": "^1.0.8",
+        "dotenv": "^16.4.7",
         "eyereasoner": "^18.4.6",
         "jsonwebtoken": "^9.0.2",
         "nock": "^14.0.1",

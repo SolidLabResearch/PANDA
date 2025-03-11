@@ -5,6 +5,8 @@ import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 const DF = new DataFactory();
+import { TokenManager } from "../authorization/TokenManager";
+const token_manager = TokenManager.getInstance();
 
 /**
  * The NotificationStreamProcessor class is responsible for processing the notifications from the LDES Stream.
@@ -31,9 +33,21 @@ export class NotificationStreamProcessor {
         this.rsp_engine = rsp_engine;
         this.stream_name = rsp_engine.getStream(ldes_stream);
         this.event_emitter = event_emitter;
-        this.subscribe_webhook_events();
-        this.retrieve_notification_from_server(this.event_emitter);
+        this.fetchAuthorizedTokenAndInitialize();
         this.logger.info({}, 'notification_stream_processor_started');
+    }
+
+
+    public async fetchAuthorizedTokenAndInitialize() {
+        const { access_token, token_type } = token_manager.getAccessToken();
+        if (access_token && token_type) {
+            this.subscribe_webhook_events();
+            this.retrieve_notification_from_server(this.event_emitter);
+        }
+        else {
+            throw new Error("The access tokens are undefined.");
+        }
+
     }
 
     /**
@@ -83,9 +97,18 @@ export class NotificationStreamProcessor {
      * @memberof NotificationStreamProcessor
      */
     public async retrieve_notification_from_server(event_emitter: any) {
-        const ldes = new LDESinLDP(this.ldes_stream, new LDPCommunication());
-        const metadata = await ldes.readMetadata();
-        const bucket_strategy = metadata.getQuads(this.ldes_stream + "#BucketizeStrategy", TREE.path, null, null)[0].object.value;
+        /**
+         * At the current moment, the LDES in LDP library doesn't initialize with the 
+         * support for authorization tokens, which caused the .readMeatadata() and the initialization
+         * of the LDES in LDP to fail as it could not find the relevant stream.
+         * Therefore, currently we hardcode the bucket strategy / timestamp predicate we require for the 
+         * usage to fetch the timestamp. (SAREF:hasTimestamp in our case)
+         * 
+         * const ldes = new LDESinLDP(this.ldes_stream, new LDPCommunication());
+         * const metadata = await ldes.readMetadata();
+         * const bucket_strategy = metadata.getQuads(this.ldes_stream + "#BucketizeStrategy", TREE.path, null, null)[0].object.value;
+         */
+        const timestamp_predicate = "https://saref.etsi.org/core/hasTimestamp";
         event_emitter.on(`${this.ldes_stream}`, async (latest_event: string) => {
             this.logger.info({}, 'latest_event_received_preprocessing_started');
             /** 
@@ -98,7 +121,7 @@ export class NotificationStreamProcessor {
              * of the Solid Stream Aggregator (for now, and the support for this will be implemented in the future).
              */
             const latest_event_store = await turtleStringToStore(latest_event);
-            const timestamp = latest_event_store.getQuads(null, DF.namedNode(bucket_strategy), null, null)[0].object.value;
+            const timestamp = latest_event_store.getQuads(null, DF.namedNode(timestamp_predicate), null, null)[0].object.value;
             const timestamp_epoch = Date.parse(timestamp);
             if (this.stream_name) {
                 this.logger.info({}, 'latest_event_received_preprocessing_completed_adding_to_rsp_engine_started');
