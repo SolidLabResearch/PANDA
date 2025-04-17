@@ -72,6 +72,10 @@ export class HTTPServer {
                 });
                 req.on('end', async () => {
                     const webhook_notification_data = JSON.parse(body);
+                    console.log(`Webhook notification data: ${JSON.stringify(webhook_notification_data)}`);
+                    this.logger.info({}, 'webhook_notification_data_received');
+                    
+                    
                     if (webhook_notification_data.type === 'Add') {
                         this.logger.info({}, 'webhook_notification_received');
                         // the target is where a new notification is added into the ldes stream.
