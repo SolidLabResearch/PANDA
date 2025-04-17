@@ -39,15 +39,9 @@ export class NotificationStreamProcessor {
 
 
     public async fetchAuthorizedTokenAndInitialize() {
-        
-        const { access_token, token_type } = token_manager.getAccessToken(this.ldes_stream);
-        if (access_token && token_type) {
-            this.subscribe_webhook_events();
-            this.retrieve_notification_from_server(this.event_emitter);
-        }
-        else {
-            throw new Error("The access tokens are undefined.");
-        }
+
+        this.subscribe_webhook_events();
+        this.retrieve_notification_from_server(this.event_emitter);
 
     }
 
@@ -67,7 +61,7 @@ export class NotificationStreamProcessor {
                     if (response_subscription) {
                         this.logger.info({}, `subscription_to_ldes_stream_was_successful`);
                         console.log(`Subscription to the LDES Stream ${this.ldes_stream} was successful.`);
-                        
+
                     }
                     else {
                         this.logger.error({}, `subscription_to_ldes_stream_failed`);
