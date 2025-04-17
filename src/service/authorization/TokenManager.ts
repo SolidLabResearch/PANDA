@@ -18,6 +18,8 @@ export class TokenManagerService {
      * Get access token info for a specific container
      */
     getAccessToken(containerUrl: string): { access_token: string | undefined, token_type: string | undefined } {
+        console.log(this.containerTokens);
+        
         const tokenInfo = this.containerTokens.get(containerUrl);
         if (tokenInfo) {
             return {

@@ -89,26 +89,11 @@ export class WebSocketHandler {
                             const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
-                            console.log(rules);
-                            
-                            const { stream_location, webID } = this.getResourceStreamAndWebIdFromQuery(ldes_query);
+                            const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
-                            await this.preAuthorize(stream_location, 'GET');
-                            if (!this.token_manager.getAccessToken(stream_location)) {
-                                console.log(`The access token is not defined. The request will be authorized.`);
-                                let { access_token, token_type } = this.token_manager.getAccessToken(stream_location);
-                                if (access_token && token_type) {
-                                    console.log(`Access granted.`);
-                                    this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
-                                }
-                                else {
-                                    console.log(`The access token is not defined eventhough the request is authorized.`);
-                                }
-                            }
-                            else {
-                                this.logger.info({ query_id: query_hashed }, `authentication_failed`);
-                                connection.send(JSON.stringify({ status: 'Authentication Failed' }));
-                            }
+                            await this.authorizeFetch(streams);
+                            console.log(`The access token is not defined. The request will be authorized.`);
+                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
                         }
                         else {
                             throw new Error(`The type of Query is not supported/handled. The type of query is: ${ws_message.type}`);
@@ -338,4 +323,17 @@ export class WebSocketHandler {
         }
     }
 
+    public return_streams(rspql_query: string): string[] {
+        const parser = new RSPQLParser();
+        let parsed = parser.parse(rspql_query);
+        return parsed.s2r.map((stream: any) => stream.stream_name);
+    }
+
+    public async authorizeFetch(containers_to_publish: string[]) {
+        await Promise.all(
+            containers_to_publish.map(container =>
+                this.preAuthorize(container, 'GET')
+            )
+        );
+    }
 }

@@ -39,6 +39,7 @@ export class NotificationStreamProcessor {
 
 
     public async fetchAuthorizedTokenAndInitialize() {
+        
         const { access_token, token_type } = token_manager.getAccessToken(this.ldes_stream);
         if (access_token && token_type) {
             this.subscribe_webhook_events();
@@ -58,16 +59,15 @@ export class NotificationStreamProcessor {
         if (this.ldes_stream !== undefined) {
             this.logger.info({}, `subscribing_to_ldes_stream_for_the_latest_events`);
             console.log(`Subscribing to the LDES Stream ${this.ldes_stream} for the latest events`);
-            const inbox = await extract_ldp_inbox(this.ldes_stream);
-            if (inbox !== undefined) {
-                const subscription_server = await extract_subscription_server(inbox);
+            if (this.ldes_stream !== undefined) {
+                const subscription_server = await extract_subscription_server(this.ldes_stream);
                 if (subscription_server !== undefined) {
-                    console.log(`The inbox is ${inbox}`);
                     const server = subscription_server.location;
-                    const response_subscription = await create_subscription(server, inbox);
+                    const response_subscription = await create_subscription(server, this.ldes_stream);
                     if (response_subscription) {
                         this.logger.info({}, `subscription_to_ldes_stream_was_successful`);
-                        console.log(`Subscription to the LDES Stream ${this.ldes_stream}'s inbox ${inbox} was successful`);
+                        console.log(`Subscription to the LDES Stream ${this.ldes_stream} was successful.`);
+                        
                     }
                     else {
                         this.logger.error({}, `subscription_to_ldes_stream_failed`);

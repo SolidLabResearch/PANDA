@@ -134,7 +134,7 @@ export async function create_subscription(subscription_server: string, inbox_loc
             method: 'POST',
             headers: {
                 'Content-Type': 'application/ld+json',
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
+                // 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             },
             body: JSON.stringify(subscription)
         })
