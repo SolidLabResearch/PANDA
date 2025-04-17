@@ -5,8 +5,8 @@ import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQu
 import { WebSocketHandler } from "./WebSocketHandler";
 import * as websocket from 'websocket';
 const EventEmitter = require('events');
-import { TokenManager } from "../service/authorization/TokenManager";
-const token_manager = TokenManager.getInstance();
+import { TokenManagerService } from "../service/authorization/TokenManager";
+const token_manager = TokenManagerService.getInstance();
 // const { access_token, token_type } = token_manager.getAccessToken()
 /**
  * Class for the HTTP Server.
@@ -60,22 +60,6 @@ export class HTTPServer {
         res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET');
         let body: string = '';
 
-
-        const fetchToken = async () => {
-            try {
-                const { access_token, token_type } = token_manager.getAccessToken();
-                return { access_token, token_type };
-            }
-            catch (error) {
-                this.logger.error(
-                    { error }, 'Token is not set for the user and the resource which is empty'
-                );
-                res.writeHead(401, { 'Content-Type': 'text/plain' });
-                res.end(`Unauthorized: Token is not set for the user and the resource which is empty`);
-                return null;
-            }
-        }
-
         switch (req.method) {
             case "GET":
                 this.logger.info({}, 'http_get_request_received');
@@ -97,7 +81,7 @@ export class HTTPServer {
                         const ldes_stream_where_event_is_added = inbox_where_event_is_added.replace(/\/\d+\/$/, '/');
                         const added_event_location = webhook_notification_data.object;
 
-                        const token_data = await fetchToken();
+                        const token_data = await TokenManagerService.getInstance().getAccessToken(ldes_stream_where_event_is_added);
                         if (token_data) {
                             const { access_token, token_type } = token_data;
                             const latest_event_response = await fetch(added_event_location, {

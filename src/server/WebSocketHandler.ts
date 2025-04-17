@@ -7,12 +7,12 @@ import { find_relevant_streams, hash_string_md5 } from "../utils/Util";
 import { QueryHandler } from "./QueryHandler";
 import { RSPQLParser } from "../service/parsers/RSPQLParser";
 import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
-import { TokenManager } from "../service/authorization/TokenManager";
+import { TokenManagerService } from "../service/authorization/TokenManager";
 import { AggregationFocusExtractor } from "../service/parsers/AggregationFocusExtractor";
 import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
 import * as AGG_CONFIG from '../config/pod_credentials.json';
 import * as dotenv from 'dotenv';
-import { AccessControlService } from "../service/authorization/AccessControlService";
+import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 dotenv.config();
 
 /**
@@ -26,9 +26,10 @@ export class WebSocketHandler {
     private connections: Map<string, WebSocket[]>;
     private parser: RSPQLParser;
     private n3_parser: Parser;
-    private token_manager: TokenManager;
+    private token_manager: TokenManagerService;
     public websocket_server: WebSocket.server;
     public event_emitter: EventEmitter;
+    public uma_fetcher: ReuseTokenUMAFetcher;
     public aggregation_publisher: LDESPublisher;
     public logger: any;
     private query_registry: AuditLoggedQueryService;
@@ -45,7 +46,11 @@ export class WebSocketHandler {
         this.logger = logger;
         this.websocket_server = websocket_server;
         this.event_emitter = event_emitter;
-        this.token_manager = TokenManager.getInstance();
+        this.token_manager = TokenManagerService.getInstance();
+        this.uma_fetcher = new ReuseTokenUMAFetcher({
+            token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
+            token_format: "urn:solidlab:uma:claims:formats:webid"
+        });
         this.aggregation_publisher = aggregation_publisher;
         this.connections = new Map<string, WebSocket[]>();
         this.parser = new RSPQLParser();
@@ -87,36 +92,29 @@ export class WebSocketHandler {
                             const aggregator_location = process.env.AGGREGATOR_SERVER_LOCATION;
                             const aggregator_fragment = process.env.AGGREGATOR_SERVER_FRAGMENT;
                             const aggregator_location_with_fragment = `${aggregator_location}#me`;
-                            const purposeForAccess = process.env.PURPOSE_FOR_ACCESS;
-                            const legalBasis = process.env.LEGAL_BASIS_FOR_ACCESS;
-                            const legalBasisForAccess = `${legalBasis}#A9-2-a`;
+                            // const purposeForAccess = process.env.PURPOSE_FOR_ACCESS;
+                            // const legalBasis = process.env.LEGAL_BASIS_FOR_ACCESS;
+                            // const legalBasisForAccess = `${legalBasis}#A9-2-a`;
                             const { stream_location, webID } = this.getResourceStreamAndWebIdFromQuery(ldes_query);
                             console.log(`Aggregator location: ${aggregator_location_with_fragment}`);
                             console.log(`Stream location: ${stream_location}`);
                             console.log(`WebID: ${webID}`);
-                            if (aggregator_location !== undefined && purposeForAccess !== undefined && legalBasisForAccess !== undefined) {
-                                const access_control_service = new AccessControlService(aggregator_location_with_fragment, stream_location, webID);
-                                this.set_connections(query_hashed, connection);
-                                if (await this.if_authenticated()) {
-                                    if (await access_control_service.authorizeRequest(purposeForAccess, legalBasisForAccess)) {
-                                        let {access_token, token_type} = this.token_manager.getAccessToken();
-                                        if (access_token && token_type){
-                                            console.log(`Access granted.`);
-                                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
-                                        }
-                                        else {
-                                            console.log(`The access token is not defined eventhough the request is authorized.`);   
-                                        }
-                                    }
-                                    else {
-                                        this.logger.info({ query_id: query_hashed }, `access_denied`);
-                                        connection.send(JSON.stringify({ status: 'Access Denied' }));
-                                    }
+                            this.set_connections(query_hashed, connection);
+                            await this.preAuthorize(stream_location, 'GET');
+                            if (!this.token_manager.getAccessToken(stream_location)) {
+                                console.log(`The access token is not defined. The request will be authorized.`);
+                                let { access_token, token_type } = this.token_manager.getAccessToken(stream_location);
+                                if (access_token && token_type) {
+                                    console.log(`Access granted.`);
+                                    this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
                                 }
                                 else {
-                                    this.logger.info({ query_id: query_hashed }, `authentication_failed`);
-                                    connection.send(JSON.stringify({ status: 'Authentication Failed' }));
+                                    console.log(`The access token is not defined eventhough the request is authorized.`);
                                 }
+                            }
+                            else {
+                                this.logger.info({ query_id: query_hashed }, `authentication_failed`);
+                                connection.send(JSON.stringify({ status: 'Authentication Failed' }));
                             }
                         }
                         else {
@@ -323,26 +321,26 @@ export class WebSocketHandler {
         this.logger.info({ query_id: query_hashed }, `websocket_connection_set_for_query`);
     }
 
-    public async if_authenticated() {
-        return true;
-        // const session = await getAuthenticatedSession({
-        //     webId: AGG_CONFIG.aggregation_pod_web_id,
-        //     password: AGG_CONFIG.aggregation_pod_password,
-        //     email: AGG_CONFIG.aggregation_pod_email,
-        // })
+    public async preAuthorize(resource: string, method: string = 'POST', headers: HeadersInit = {}, body?: string): Promise<void> {
+        console.log(`[Fetcher] Pre-authorizing resource: ${resource} with method: ${method}`);
 
-        // if (session) {
-        //     return true;
-        // }
-        // else {
-        //     return false;
-        // }
+        const requestInit: RequestInit = {
+            method,
+            headers,
+        };
+
+        if (body) {
+            requestInit.body = body;
+        }
+
+        await this.uma_fetcher.fetch(resource, requestInit);
     }
+
 
     public getResourceStreamAndWebIdFromQuery(rspql_query: string) {
         const stream_match_regex = /FROM NAMED WINDOW\s+[^ ]+\s+ON STREAM\s+<([^>]+)>/;
         const stream_match = rspql_query.match(stream_match_regex);
-        
+
         if (stream_match !== null) {
             const stream_location = stream_match[1]; // Extracts the stream URL
             let webID = stream_location.replace(/\/[^/]+\/?$/, '/profile/card#me');
@@ -352,5 +350,5 @@ export class WebSocketHandler {
             throw new Error("The stream is not found in the query.");
         }
     }
-    
+
 }

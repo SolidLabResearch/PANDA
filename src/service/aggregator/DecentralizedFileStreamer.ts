@@ -16,8 +16,7 @@ import { TREE } from "@treecg/ldes-snapshot";
 import { Session } from "@inrupt/solid-client-authn-node";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json'
-import { TokenManager } from "../authorization/TokenManager";
-const { access_token, token_type } = TokenManager.getInstance().getAccessToken();
+import { TokenManagerService } from "../authorization/TokenManager";
 /**
  * Class for streaming the events from the Solid Pod to the RSP Engine by reading the events and converting the events stored into files into a stream.
  * @class DecentralizedFileStreamer
@@ -298,6 +297,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async subscribe_webhook_notification(ldes_stream: string): Promise<void> {
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const webhook_notification_server = solid_server + "/.notifications/WebhookChannel2023/";
         const post_body = {
@@ -328,6 +328,8 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer 
      */
     async get_stream_subscription_url(ldes_stream: string): Promise<string> {
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
+
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
         const post_body = {
@@ -373,6 +375,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async get_inbox_subscription_notification_url(ldes_stream: string, inbox_container: string): Promise<string> {
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
         const post_body = {

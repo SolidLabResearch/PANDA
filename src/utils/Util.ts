@@ -1,11 +1,10 @@
 import { createHash } from 'crypto'
-import { TokenManager } from '../service/authorization/TokenManager';
+import { TokenManagerService } from '../service/authorization/TokenManager';
 const { exec } = require('child_process');
 const ldfetch = require('ldfetch');
 const ld_fetch = new ldfetch({});
 const N3 = require('n3');
-const token_manager = TokenManager.getInstance();
-const { access_token, token_type } = token_manager.getAccessToken()
+const token_manager = TokenManagerService.getInstance();
 
 /**
  * Hash a string using the MD5 algorithm.
@@ -127,15 +126,16 @@ export function insertion_sort(arr: string[]): string[] {
  * @returns {Promise<string[]>} - The relevant streams.
  */
 export async function find_relevant_streams(solid_pod_url: string, interest_metrics: string[]): Promise<string[]> {
-    const relevant_streams: string[] = [];    
+    const relevant_streams: string[] = [];
     if (await if_exists_relevant_streams(solid_pod_url, interest_metrics)) {
         try {
-            const public_type_index = await find_public_type_index(solid_pod_url);      
+            const public_type_index = await find_public_type_index(solid_pod_url);
+            const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url)
             const response = await ld_fetch.get(public_type_index, {
                 Headers: {
                     'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
                 }
-            });            
+            });
             const store = new N3.Store(await response.triples);
             for (const quad of store) {
                 if (quad.predicate.value == "https://w3id.org/tree#view") {
@@ -162,6 +162,7 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
  * @returns {Promise<boolean>} - Returns true if relevant streams exist, otherwise false.
  */
 export async function if_exists_relevant_streams(solid_pod_url: string, interest_metrics: string[]): Promise<boolean> {
+    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url)
     try {
         const public_type_index = await find_public_type_index(solid_pod_url);
         const response = await ld_fetch.get(public_type_index, {
@@ -191,7 +192,8 @@ export async function if_exists_relevant_streams(solid_pod_url: string, interest
  * @returns {Promise<string>} - The public type index.
  */
 export async function find_public_type_index(solid_pod_url: string): Promise<string> {
-    const profile_document = solid_pod_url + "profile/card";    
+    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url);
+    const profile_document = solid_pod_url + "profile/card";
     try {
         const response = await ld_fetch.get(profile_document, {
             Headers: {
@@ -199,7 +201,7 @@ export async function find_public_type_index(solid_pod_url: string): Promise<str
             }
         });
         const store = new N3.Store(await response.triples);
-        for (const quad of store) {            
+        for (const quad of store) {
             if (quad.predicate.value == "http://www.w3.org/ns/solid/terms#publicTypeIndex") {
                 return quad.object.value;
             }

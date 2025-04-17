@@ -3,8 +3,8 @@ import { SubscriptionServerNotification } from '../Types';
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json';
 const N3 = require('n3');
 const parser = new N3.Parser();
-import { TokenManager } from '../../service/authorization/TokenManager';
-const token_manager = TokenManager.getInstance();
+import { TokenManagerService } from '../../service/authorization/TokenManager';
+const token_manager = TokenManagerService.getInstance();
 /**
  * Extracts the subscription server from the given resource.
  * @param {string} resource - The resource which you want to read the notifications from.
@@ -28,9 +28,9 @@ export async function extract_subscription_server(resource: string): Promise<Sub
 
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken();
+        const { access_token, token_type } = token_manager.getAccessToken(resource);
         console.log(access_token, token_type);
-        
+
         const response = await axios.head(resource, {
             headers: {
                 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
@@ -84,16 +84,16 @@ export async function extract_subscription_server(resource: string): Promise<Sub
  */
 export async function extract_ldp_inbox(ldes_stream_location: string) {
     console.log(ldes_stream_location);
-    
+
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken();
+        const { access_token, token_type } = token_manager.getAccessToken(ldes_stream_location);
         const response = await fetch(ldes_stream_location, {
             headers: {
                 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             }
         });
-        if (response) {            
+        if (response) {
             await parser.parse(await response.text(), (error: any, quad: any) => {
                 if (error) {
                     console.error(error);
@@ -129,7 +129,7 @@ export async function create_subscription(subscription_server: string, inbox_loc
             "topic": `${inbox_location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
         }
-        const { access_token, token_type } = token_manager.getAccessToken()
+        const { access_token, token_type } = token_manager.getAccessToken(inbox_location)
         const response = await fetch(subscription_server, {
             method: 'POST',
             headers: {

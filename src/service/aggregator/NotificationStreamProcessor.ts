@@ -5,8 +5,8 @@ import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 const DF = new DataFactory();
-import { TokenManager } from "../authorization/TokenManager";
-const token_manager = TokenManager.getInstance();
+import { TokenManagerService } from "../authorization/TokenManager";
+const token_manager = TokenManagerService.getInstance();
 
 /**
  * The NotificationStreamProcessor class is responsible for processing the notifications from the LDES Stream.
@@ -39,7 +39,7 @@ export class NotificationStreamProcessor {
 
 
     public async fetchAuthorizedTokenAndInitialize() {
-        const { access_token, token_type } = token_manager.getAccessToken();
+        const { access_token, token_type } = token_manager.getAccessToken(this.ldes_stream);
         if (access_token && token_type) {
             this.subscribe_webhook_events();
             this.retrieve_notification_from_server(this.event_emitter);
