@@ -77,8 +77,8 @@ export class HTTPServer {
                         // the target is where a new notification is added into the ldes stream.
                         // LDES stream can be found by stripping the inbox from the target with the slash semantics as described in the Solid Protocol.
                         // Link : https://solidproject.org/TR/protocol#uri-slash-semantics
-                        const inbox_where_event_is_added = webhook_notification_data.target;
-                        const ldes_stream_where_event_is_added = inbox_where_event_is_added.replace(/\/\d+\/$/, '/');
+                        const location_where_event_is_added = webhook_notification_data.target;
+                        const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
                         const added_event_location = webhook_notification_data.object;
 
                         const token_data = await TokenManagerService.getInstance().getAccessToken(ldes_stream_where_event_is_added);

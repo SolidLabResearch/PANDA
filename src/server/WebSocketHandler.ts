@@ -89,16 +89,9 @@ export class WebSocketHandler {
                             const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
-                            const aggregator_location = process.env.AGGREGATOR_SERVER_LOCATION;
-                            const aggregator_fragment = process.env.AGGREGATOR_SERVER_FRAGMENT;
-                            const aggregator_location_with_fragment = `${aggregator_location}#me`;
-                            // const purposeForAccess = process.env.PURPOSE_FOR_ACCESS;
-                            // const legalBasis = process.env.LEGAL_BASIS_FOR_ACCESS;
-                            // const legalBasisForAccess = `${legalBasis}#A9-2-a`;
+                            console.log(rules);
+                            
                             const { stream_location, webID } = this.getResourceStreamAndWebIdFromQuery(ldes_query);
-                            console.log(`Aggregator location: ${aggregator_location_with_fragment}`);
-                            console.log(`Stream location: ${stream_location}`);
-                            console.log(`WebID: ${webID}`);
                             this.set_connections(query_hashed, connection);
                             await this.preAuthorize(stream_location, 'GET');
                             if (!this.token_manager.getAccessToken(stream_location)) {
@@ -141,9 +134,6 @@ export class WebSocketHandler {
                                 }
                             }
                         }
-                    }
-                    else if (Object.keys(ws_message).includes('type')) {
-                        console.log(ws_message);
                     }
                     else {
                         throw new Error('Unknown message, not handled.');
@@ -292,9 +282,6 @@ export class WebSocketHandler {
     public async preprocess_query(query: string): Promise<{ ldes_query: string, query_hashed: string, width: number }> {
         const parsed = this.parser.parse(query);
         const pod_url = parsed.s2r[0].stream_name;
-        const interest_metric = new AggregationFocusExtractor(query).extract_focus();
-        // const streams = await find_relevant_streams(pod_url, interest_metric);
-        // const ldes_stream = streams[0];
         const ldes_query = query.replace(pod_url, pod_url);
         const width = parsed.s2r[0].width;
         const query_hashed = hash_string_md5(ldes_query);
