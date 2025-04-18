@@ -293,7 +293,11 @@ export class WebSocketHandler {
         this.logger.info({ query_id: query_hashed }, `websocket_connection_set_for_query`);
     }
 
-    public async preAuthorize(resource: string, method: string = 'POST', headers: HeadersInit = {}, body?: string): Promise<void> {
+    public async preAuthorize(resource: string, method: string, headers: HeadersInit = {}, body?: string): Promise<void> {
+        if (method === undefined) {
+            console.log(`The method is not defined. The default method is set to POST.`);
+            method = "POST"
+        }
         console.log(`[Fetcher] Pre-authorizing resource: ${resource} with method: ${method}`);
 
         const requestInit: RequestInit = {
@@ -334,6 +338,12 @@ export class WebSocketHandler {
             containers_to_publish.map(container =>
                 this.preAuthorize(container, 'GET')
             )
-        );
+        ).then(() => {
+            containers_to_publish.map(container => {
+                this.preAuthorize(container, 'POST', {
+                    'Content-Type': 'text/turtle',
+                }, 'Some body');
+            })
+        });
     }
 }
