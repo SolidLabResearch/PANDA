@@ -1,7 +1,8 @@
 export class TokenManagerService {
     private static instance: TokenManagerService;
 
-    private containerTokens: Map<string, { access_token: string, token_type: string }>;
+    // Map<containerUrl, Map<httpMethod, tokenInfo>>
+    private containerTokens: Map<string, Map<string, { access_token: string, token_type: string }>>;
 
     private constructor() {
         this.containerTokens = new Map();
@@ -15,39 +16,54 @@ export class TokenManagerService {
     }
 
     /**
-     * Get access token info for a specific container
+     * Get access token info for a specific container and HTTP method
      */
-    getAccessToken(containerUrl: string): { access_token: string | undefined, token_type: string | undefined } {
-        console.log(this.containerTokens);
-        
-        const tokenInfo = this.containerTokens.get(containerUrl);
-        if (tokenInfo) {
-            return {
-                access_token: tokenInfo.access_token,
-                token_type: tokenInfo.token_type
-            };
-        } else {
-            console.log(`Access token not found for container: ${containerUrl}`);
-            return { access_token: undefined, token_type: undefined };
+    getAccessToken(containerUrl: string, method: string ): { access_token: string | undefined, token_type: string | undefined } {
+        const methodUpper = method.toUpperCase();
+        const methodMap = this.containerTokens.get(containerUrl);
+
+        if (methodMap) {
+            const tokenInfo = methodMap.get(methodUpper);
+            if (tokenInfo) {
+                return {
+                    access_token: tokenInfo.access_token,
+                    token_type: tokenInfo.token_type
+                };
+            }
         }
+
+        console.log(`Access token not found for container: ${containerUrl}, method: ${methodUpper}`);
+        return { access_token: undefined, token_type: undefined };
     }
 
     /**
-     * Set access token info for a specific container
+     * Set access token info for a specific container and HTTP method
      */
-    setAccessToken(containerUrl: string, access_token: string, token_type: string): void {
+    setAccessToken(containerUrl: string, method: string, access_token: string, token_type: string): void {
+        const methodUpper = method.toUpperCase();
         if (!this.containerTokens.has(containerUrl)) {
-            this.containerTokens.set(containerUrl, { access_token, token_type });
+            this.containerTokens.set(containerUrl, new Map());
+        }
+
+        const methodMap = this.containerTokens.get(containerUrl)!;
+
+        if (!methodMap.has(methodUpper)) {
+            methodMap.set(methodUpper, { access_token, token_type });
         } else {
-            console.error(`Access token already set for container: ${containerUrl}`);
+            console.error(`Access token already set for container: ${containerUrl}, method: ${methodUpper}`);
         }
     }
 
     /**
-     * Optionally clear tokens for a container (or all)
+     * Clear tokens — either for a specific method, or all methods of a container, or all containers
      */
-    clearAccessToken(containerUrl?: string): void {
-        if (containerUrl) {
+    clearAccessToken(containerUrl?: string, method?: string): void {
+        if (containerUrl && method) {
+            const methodMap = this.containerTokens.get(containerUrl);
+            if (methodMap) {
+                methodMap.delete(method.toUpperCase());
+            }
+        } else if (containerUrl) {
             this.containerTokens.delete(containerUrl);
         } else {
             this.containerTokens.clear();

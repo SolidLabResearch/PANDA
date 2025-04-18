@@ -85,7 +85,7 @@ export class HTTPServer {
                         const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
                         const added_event_location = webhook_notification_data.object;
 
-                        const token_data = await TokenManagerService.getInstance().getAccessToken(ldes_stream_where_event_is_added);
+                        const token_data = await TokenManagerService.getInstance().getAccessToken(ldes_stream_where_event_is_added, 'GET');
                         if (token_data) {
                             const { access_token, token_type } = token_data;
                             const latest_event_response = await fetch(added_event_location, {

@@ -130,7 +130,7 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
     if (await if_exists_relevant_streams(solid_pod_url, interest_metrics)) {
         try {
             const public_type_index = await find_public_type_index(solid_pod_url);
-            const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url)
+            const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url, 'GET');
             const response = await ld_fetch.get(public_type_index, {
                 Headers: {
                     'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
@@ -162,7 +162,7 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
  * @returns {Promise<boolean>} - Returns true if relevant streams exist, otherwise false.
  */
 export async function if_exists_relevant_streams(solid_pod_url: string, interest_metrics: string[]): Promise<boolean> {
-    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url)
+    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url, 'GET');
     try {
         const public_type_index = await find_public_type_index(solid_pod_url);
         const response = await ld_fetch.get(public_type_index, {
@@ -192,7 +192,7 @@ export async function if_exists_relevant_streams(solid_pod_url: string, interest
  * @returns {Promise<string>} - The public type index.
  */
 export async function find_public_type_index(solid_pod_url: string): Promise<string> {
-    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url);
+    const { access_token, token_type } = token_manager.getAccessToken(solid_pod_url, 'GET');
     const profile_document = solid_pod_url + "profile/card";
     try {
         const response = await ld_fetch.get(profile_document, {

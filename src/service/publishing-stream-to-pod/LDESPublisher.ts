@@ -125,7 +125,7 @@ export class LDESPublisher {
      * @memberof LDESPublisher 
      */
     public async update_latest_inbox(aggregation_pod_ldes_location: string) {
-        const { access_token, token_type } = token_manager.getAccessToken(aggregation_pod_ldes_location)
+        const { access_token, token_type } = token_manager.getAccessToken(aggregation_pod_ldes_location, 'GET');
         const inbox_location: string[] = [];
         ldfetch.get(aggregation_pod_ldes_location, {
             headers: {

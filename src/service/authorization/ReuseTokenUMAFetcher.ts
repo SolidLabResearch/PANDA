@@ -19,7 +19,11 @@ export class ReuseTokenUMAFetcher {
 
     public async fetch(url: string, init: RequestInit = {}): Promise<Response> {
         console.log(`[Fetcher] Attempting to fetch: ${url}`);
-        const tokenInfo = this.tokenManagerService.getAccessToken(url);
+        if (init.method === undefined) {
+            init.method = 'GET';
+            console.log(`[Fetcher] Defaulting method to GET`);
+        }
+        const tokenInfo = this.tokenManagerService.getAccessToken(url, init.method);
         console.log(`[Fetcher] Retrieved token info from TokenManager:`, tokenInfo);
 
         // Step 0: Try stored token first
@@ -103,7 +107,7 @@ export class ReuseTokenUMAFetcher {
         const { access_token, token_type } = await rptResponse.json();
         console.log(`[Fetcher] Received RPT - Token Type: ${token_type}`);
 
-        this.tokenManagerService.setAccessToken(url, access_token, token_type);
+        this.tokenManagerService.setAccessToken(url, access_token, token_type, init.method);
         const headers = new Headers(init.headers);
         headers.set('Authorization', `${token_type} ${access_token}`);
 

@@ -297,7 +297,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async subscribe_webhook_notification(ldes_stream: string): Promise<void> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream, 'POST');
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const webhook_notification_server = solid_server + "/.notifications/WebhookChannel2023/";
         const post_body = {
@@ -328,7 +328,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer 
      */
     async get_stream_subscription_url(ldes_stream: string): Promise<string> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream, 'POST');
 
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
@@ -375,7 +375,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async get_inbox_subscription_notification_url(ldes_stream: string, inbox_container: string): Promise<string> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
+        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream, 'POST');
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
         const post_body = {

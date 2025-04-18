@@ -123,8 +123,13 @@ export class UserManagedAccessFetcher {
         // RPT added to header
         const headers = new Headers(init.headers);
 
-        this.tokenManagerService.setAccessToken(url, asResponse.access_token, asResponse.token_type);
-        console.log(this.tokenManagerService.getAccessToken(url));
+        if (init.method === undefined) {
+            init.method = 'GET';
+            console.log('No method was specified. Defaulting to GET.');
+            
+        }
+        this.tokenManagerService.setAccessToken(url, init.method, asResponse.access_token, asResponse.token_type);
+        console.log(this.tokenManagerService.getAccessToken(url, init.method));
 
 
         headers.set('Authorization', `${asResponse.token_type} ${asResponse.access_token}`);
