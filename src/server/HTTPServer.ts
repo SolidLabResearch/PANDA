@@ -93,7 +93,7 @@ export class HTTPServer {
 
                         const derived_target = this.toDerivedTarget(location_where_event_is_added);
 
-                        const latest_event_response = await this.uma_fetcher.fetch({
+                        const latest_event_response = await this.uma_fetcher.fetch(derived_target, {
                             method: 'GET',
                             headers: {
                                 'Accept': 'text/turtle'
