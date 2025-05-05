@@ -104,24 +104,6 @@ export class HTTPServer {
                         console.log(`The latest event is ${latest_event}`);
                         this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
                         this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                        // const token_data = await TokenManagerService.getInstance().getAccessToken(derived_target, 'GET');
-                        // if (token_data) {
-                        //     const { access_token, token_type } = token_data;
-                        //     const latest_event_response = await fetch(derived_target, {
-                        //         method: 'GET',
-                        //         headers: {
-                        //             'Authorization': `${token_type} ${access_token}`, // Add the access token to the headers.
-                        //             'Accept': 'text/turtle'
-                        //         }
-                        //     });
-                        //     const latest_event = await latest_event_response.text();
-                        //     console.log(`The latest event is ${latest_event}`);
-                        //     this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                        //     this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                        // }
-                        // else {
-                        //     this.logger.error({}, 'webhook_notification_processing_failed as the token is not set for the user and the resource which is empty');
-                        // }
                     }
                 });
                 break;
