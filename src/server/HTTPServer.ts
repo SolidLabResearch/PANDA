@@ -85,10 +85,11 @@ export class HTTPServer {
                         const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
                         const added_event_location = webhook_notification_data.object;
 
-                        const token_data = await TokenManagerService.getInstance().getAccessToken(ldes_stream_where_event_is_added, 'GET');
+                        const derived_target = this.toDerivedTarget(location_where_event_is_added);
+                        const token_data = await TokenManagerService.getInstance().getAccessToken(derived_target, 'GET');
                         if (token_data) {
                             const { access_token, token_type } = token_data;
-                            const latest_event_response = await fetch(added_event_location, {
+                            const latest_event_response = await fetch(derived_target, {
                                 method: 'GET',
                                 headers: {
                                     'Authorization': `${token_type} ${access_token}`, // Add the access token to the headers.
@@ -129,5 +130,17 @@ export class HTTPServer {
     public close() {
         this.http_server.close();
         this.logger.info({}, 'http_server_closed');
+    }
+
+    public toDerivedTarget(originalUrl: string): string {
+        const url = new URL(originalUrl);
+        const parts = url.pathname.split('/').filter(Boolean); // removes empty segments
+    
+        const basePath = parts.slice(0, -1).join('/');  // e.g., "alice"
+        const lastSegment = parts[parts.length - 1];    // e.g., "acc-x"
+    
+        // Construct new path: /alice/derived/acc-x
+        url.pathname = `/${basePath}/derived/${lastSegment}`;
+        return url.toString();
     }
 }

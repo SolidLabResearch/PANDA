@@ -31,7 +31,6 @@ export class TokenManagerService {
                 };
             }
         }
-
         console.log(`Access token not found for container: ${containerUrl}, method: ${methodUpper}`);
         return { access_token: undefined, token_type: undefined };
     }
