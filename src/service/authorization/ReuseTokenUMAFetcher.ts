@@ -7,14 +7,24 @@ import { UserManagedAccessFetcher, Claim, parseAuthenticateHeader } from './User
  * stored in the TokenManagerService before falling back to the UMA authorization flow.
  */
 export class ReuseTokenUMAFetcher {
+    private static instance: ReuseTokenUMAFetcher | null = null;
     private readonly umaFetcher: UserManagedAccessFetcher;
     private readonly tokenManagerService: TokenManagerService;
     private readonly claim: Claim;
 
-    constructor(claim: Claim) {
+    // Private constructor ensures that the class is a singleton
+    private constructor(claim: Claim) {
         this.claim = claim;
         this.umaFetcher = new UserManagedAccessFetcher(claim);
         this.tokenManagerService = TokenManagerService.getInstance();
+    }
+
+    // Public method to access the singleton instance
+    public static getInstance(claim: Claim): ReuseTokenUMAFetcher {
+        if (this.instance === null) {
+            this.instance = new ReuseTokenUMAFetcher(claim);
+        }
+        return this.instance;
     }
 
     public async fetch(url: string, init: RequestInit = {}): Promise<Response> {

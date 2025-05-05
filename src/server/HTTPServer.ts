@@ -34,7 +34,7 @@ export class HTTPServer {
     constructor(http_port: number, solid_server_url: string, logger: any) {
         this.solid_server_url = solid_server_url;
         this.dynamic_endpoints = {};
-        this.uma_fetcher = new ReuseTokenUMAFetcher({
+        this.uma_fetcher = ReuseTokenUMAFetcher.getInstance({
             token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
             token_format: "urn:solidlab:uma:claims:formats:webid"
         });
