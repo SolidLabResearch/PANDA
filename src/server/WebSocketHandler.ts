@@ -342,7 +342,7 @@ export class WebSocketHandler {
             containers_to_publish.map(container => {
                 this.preAuthorize(container, 'POST', {
                     'Content-Type': 'text/turtle',
-                }, 'Some body');
+                }, '<> <> <>');
             })
         });
     }
