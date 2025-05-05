@@ -137,7 +137,13 @@ export class ReuseTokenUMAFetcher {
             headers: {
                 'Content-Type': 'text/turtle',
             },
-            body: '<> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Dummy> .'
+            body: `<https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <http://rdfs.org/ns/void#inDataset> <https://dahcc.idlab.ugent.be/Protego/_participant1> .
+            <https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <https://saref.etsi.org/core/measurementMadeBy> <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/E4.A03846.Accelerometer> .
+            <https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <http://purl.org/dc/terms/isVersionOf> <https://saref.etsi.org/core/Measurement> .
+            <https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <https://saref.etsi.org/core/relatesToProperty> <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.acceleration.x> .
+            <https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <https://saref.etsi.org/core/hasTimestamp> "2025-05-05T12:57:59.166Z" .
+            <https://dahcc.idlab.ugent.be/Protego/_participant1/obs1> <https://saref.etsi.org/core/hasValue> "-22.0"^^<http://www.w3.org/2001/XMLSchema#float> .
+            `
         });
     }
 }
