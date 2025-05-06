@@ -17,10 +17,12 @@ export class ReuseTokenUMAFetcher {
 
     public async fetch(url: string, init: RequestInit = {}): Promise<Response> {
         console.log(`[Fetcher] Attempting to fetch: ${url}`);
+
+        // Step 0: Try stored token first (check for existing token in cache)
         const tokenInfo = this.tokenManagerService.getAccessToken(url);
         console.log(`[Fetcher] Retrieved token info from TokenManager:`, tokenInfo);
 
-        // Step 0: Try stored token first
+        // Check if we have a valid access token in the cache
         if (tokenInfo.access_token && tokenInfo.token_type) {
             const headers = new Headers(init.headers);
             headers.set('Authorization', `${tokenInfo.token_type} ${tokenInfo.access_token}`);
@@ -45,7 +47,7 @@ export class ReuseTokenUMAFetcher {
             }
         }
 
-        // Step 1: Try tokenless request to get WWW-Authenticate
+        // Step 1: Attempt UMA flow only if necessary (token missing or expired)
         let noTokenResponse: Response;
         try {
             console.log(`[Fetcher] Attempting tokenless request to get challenge.`);
@@ -64,7 +66,6 @@ export class ReuseTokenUMAFetcher {
         let tokenEndpoint: string, ticket: string;
         try {
             ({ tokenEndpoint, ticket } = parseAuthenticateHeader(noTokenResponse.headers));
-            console.log(noTokenResponse.headers)
             console.log(`[Fetcher] Parsed token endpoint: ${tokenEndpoint}`);
             console.log(`[Fetcher] Parsed ticket: ${ticket}`);
         } catch (err) {
@@ -72,6 +73,23 @@ export class ReuseTokenUMAFetcher {
             throw err;
         }
 
+        // Step 2: Check if the ticket has already been used recently (to avoid multiple RPT requests for the same ticket)
+        const existingRPT = this.tokenManagerService.getRPT(ticket);
+        if (existingRPT) {
+            console.log(`[Fetcher] Using previously cached RPT.`);
+            const headers = new Headers(init.headers);
+            headers.set('Authorization', `${existingRPT.token_type} ${existingRPT.access_token}`);
+            
+            try {
+                console.log(`[Fetcher] Final request with cached RPT.`);
+                return await fetch(url, { ...init, headers });
+            } catch (err) {
+                console.error(`[Fetcher] Final fetch with cached RPT failed:`, err);
+                throw err;
+            }
+        }
+
+        // Step 3: Request RPT from the token endpoint if not already cached
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
@@ -102,7 +120,9 @@ export class ReuseTokenUMAFetcher {
         const { access_token, token_type } = await rptResponse.json();
         console.log(`[Fetcher] Received RPT - Token Type: ${token_type}`);
 
-        this.tokenManagerService.setAccessToken(url, access_token, token_type);
+        // Store the RPT for future use
+        this.tokenManagerService.setRPT(ticket, { access_token, token_type });
+
         const headers = new Headers(init.headers);
         headers.set('Authorization', `${token_type} ${access_token}`);
 
@@ -132,4 +152,3 @@ export class ReuseTokenUMAFetcher {
         });
     }
 }
-
