@@ -5,10 +5,9 @@ import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQu
 import { WebSocketHandler } from "./WebSocketHandler";
 import * as websocket from 'websocket';
 const EventEmitter = require('events');
-import { TokenManagerService } from "../service/authorization/TokenManager";
+import { TokenManagerService } from "../service/authorization/TokenManagerService";
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
-const token_manager = TokenManagerService.getInstance();
-// const { access_token, token_type } = token_manager.getAccessToken()
+
 /**
  * Class for the HTTP Server.
  * @class HTTPServer
@@ -34,7 +33,7 @@ export class HTTPServer {
     constructor(http_port: number, solid_server_url: string, logger: any) {
         this.solid_server_url = solid_server_url;
         this.dynamic_endpoints = {};
-        this.uma_fetcher = ReuseTokenUMAFetcher.getInstance({
+        this.uma_fetcher = new ReuseTokenUMAFetcher({
             token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
             token_format: "urn:solidlab:uma:claims:formats:webid"
         });
@@ -89,21 +88,36 @@ export class HTTPServer {
                         // Link : https://solidproject.org/TR/protocol#uri-slash-semantics
                         const location_where_event_is_added = webhook_notification_data.target;
                         const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
-                        const added_event_location = webhook_notification_data.object;
 
                         const derived_target = this.toDerivedTarget(location_where_event_is_added);
+                        const {token_type, access_token} = TokenManagerService.getInstance().getAccessToken(derived_target)
+                        if (token_type && access_token){
+                            const latest_event_response = await this.uma_fetcher.fetch(derived_target, {
+                                method: 'GET',
+                                headers: {
+                                    'Accept': 'text/turtle'
+                                }
+                            });
+    
+                            const latest_event = await latest_event_response.text();
+                            console.log(`The latest event is ${latest_event}`);
+                            this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
+                            this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                        }
+                        else {
+                            const latest_event_response = await this.uma_fetcher.fetch(derived_target, {
+                                method: 'GET',
+                                headers: {
+                                    'Accept': 'text/turtle'
+                                }
+                            });
+    
+                            const latest_event = await latest_event_response.text();
+                            console.log(`The latest event is ${latest_event}`);
+                            this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
+                            this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                        }
 
-                        const latest_event_response = await this.uma_fetcher.fetch(derived_target, {
-                            method: 'GET',
-                            headers: {
-                                'Accept': 'text/turtle'
-                            }
-                        });
-
-                        const latest_event = await latest_event_response.text();
-                        console.log(`The latest event is ${latest_event}`);
-                        this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                        this.logger.info({}, 'webhook_notification_processed_and_emitted');
                     }
                 });
                 break;

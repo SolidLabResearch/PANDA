@@ -1,5 +1,5 @@
 import { fetch } from 'cross-fetch';
-import { TokenManagerService } from './TokenManager';
+import { TokenManagerService } from './TokenManagerService';
 import { UserManagedAccessFetcher, Claim, parseAuthenticateHeader } from './UserManagedAccessFetcher';
 
 /**
@@ -7,33 +7,17 @@ import { UserManagedAccessFetcher, Claim, parseAuthenticateHeader } from './User
  * stored in the TokenManagerService before falling back to the UMA authorization flow.
  */
 export class ReuseTokenUMAFetcher {
-    private static instance: ReuseTokenUMAFetcher | null = null;
-    private readonly umaFetcher: UserManagedAccessFetcher;
     private readonly tokenManagerService: TokenManagerService;
     private readonly claim: Claim;
 
-    // Private constructor ensures that the class is a singleton
-    private constructor(claim: Claim) {
+    constructor(claim: Claim) {
         this.claim = claim;
-        this.umaFetcher = new UserManagedAccessFetcher(claim);
         this.tokenManagerService = TokenManagerService.getInstance();
-    }
-
-    // Public method to access the singleton instance
-    public static getInstance(claim: Claim): ReuseTokenUMAFetcher {
-        if (this.instance === null) {
-            this.instance = new ReuseTokenUMAFetcher(claim);
-        }
-        return this.instance;
     }
 
     public async fetch(url: string, init: RequestInit = {}): Promise<Response> {
         console.log(`[Fetcher] Attempting to fetch: ${url}`);
-        if (init.method === undefined) {
-            init.method = 'GET';
-            console.log(`[Fetcher] Defaulting method to GET`);
-        }
-        const tokenInfo = this.tokenManagerService.getAccessToken(url, init.method);
+        const tokenInfo = this.tokenManagerService.getAccessToken(url);
         console.log(`[Fetcher] Retrieved token info from TokenManager:`, tokenInfo);
 
         // Step 0: Try stored token first
@@ -80,6 +64,7 @@ export class ReuseTokenUMAFetcher {
         let tokenEndpoint: string, ticket: string;
         try {
             ({ tokenEndpoint, ticket } = parseAuthenticateHeader(noTokenResponse.headers));
+            console.log(noTokenResponse.headers)
             console.log(`[Fetcher] Parsed token endpoint: ${tokenEndpoint}`);
             console.log(`[Fetcher] Parsed ticket: ${ticket}`);
         } catch (err) {
@@ -117,7 +102,7 @@ export class ReuseTokenUMAFetcher {
         const { access_token, token_type } = await rptResponse.json();
         console.log(`[Fetcher] Received RPT - Token Type: ${token_type}`);
 
-        this.tokenManagerService.setAccessToken(url, access_token, token_type, init.method);
+        this.tokenManagerService.setAccessToken(url, access_token, token_type);
         const headers = new Headers(init.headers);
         headers.set('Authorization', `${token_type} ${access_token}`);
 
@@ -147,3 +132,4 @@ export class ReuseTokenUMAFetcher {
         });
     }
 }
+

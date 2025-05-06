@@ -5,7 +5,7 @@ import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 const DF = new DataFactory();
-import { TokenManagerService } from "../authorization/TokenManager";
+import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
 
 /**

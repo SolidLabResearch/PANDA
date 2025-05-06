@@ -3,7 +3,7 @@ import { SubscriptionServerNotification } from '../Types';
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json';
 const N3 = require('n3');
 const parser = new N3.Parser();
-import { TokenManagerService } from '../../service/authorization/TokenManager';
+import { TokenManagerService } from '../../service/authorization/TokenManagerService';
 const token_manager = TokenManagerService.getInstance();
 /**
  * Extracts the subscription server from the given resource.
@@ -28,7 +28,7 @@ export async function extract_subscription_server(resource: string): Promise<Sub
 
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken(resource, 'GET');
+        const { access_token, token_type } = token_manager.getAccessToken(resource);
         console.log(access_token, token_type);
 
         const response = await axios.head(resource, {
@@ -87,7 +87,7 @@ export async function extract_ldp_inbox(ldes_stream_location: string) {
 
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken(ldes_stream_location, 'GET');
+        const { access_token, token_type } = token_manager.getAccessToken(ldes_stream_location);
         const response = await fetch(ldes_stream_location, {
             headers: {
                 'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
@@ -129,7 +129,7 @@ export async function create_subscription(subscription_server: string, location:
             "topic": `${location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
         }
-        const { access_token, token_type } = token_manager.getAccessToken(location, 'POST');
+        const { access_token, token_type } = token_manager.getAccessToken(location);
         const response = await fetch(subscription_server, {
             method: 'POST',
             headers: {

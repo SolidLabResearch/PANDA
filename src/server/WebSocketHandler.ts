@@ -7,7 +7,7 @@ import { find_relevant_streams, hash_string_md5 } from "../utils/Util";
 import { QueryHandler } from "./QueryHandler";
 import { RSPQLParser } from "../service/parsers/RSPQLParser";
 import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
-import { TokenManagerService } from "../service/authorization/TokenManager";
+import { TokenManagerService } from "../service/authorization/TokenManagerService";
 import { AggregationFocusExtractor } from "../service/parsers/AggregationFocusExtractor";
 import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
 import * as AGG_CONFIG from '../config/pod_credentials.json';
@@ -47,7 +47,7 @@ export class WebSocketHandler {
         this.websocket_server = websocket_server;
         this.event_emitter = event_emitter;
         this.token_manager = TokenManagerService.getInstance();
-        this.uma_fetcher = ReuseTokenUMAFetcher.getInstance({
+        this.uma_fetcher = new ReuseTokenUMAFetcher({
             token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
             token_format: "urn:solidlab:uma:claims:formats:webid"
         });
@@ -91,7 +91,7 @@ export class WebSocketHandler {
                             const rules = ws_message.rules;
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
-                            await this.authorizeFetch(streams);
+                            // await this.authorizeFetch(streams);
                             await this.authorizeDerivedResource(streams);
                             console.log(`The access token is not defined. The request will be authorized.`);
                             this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);

@@ -13,7 +13,7 @@ import { RateLimitedLDPCommunication } from "rate-limited-ldp-communication";
 const { quad, namedNode, literal } = DataFactory;
 const ldfetch = require('ldfetch');
 const fetch = new ldfetch({});
-import { TokenManagerService } from "../authorization/TokenManager";
+import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
 /**
  * The QueryAnnotationPublishing class is responsible for publishing the generated aggregation events from the RSP Engine with the
@@ -100,7 +100,7 @@ export class QueryAnnotationPublishing {
         }
         delete bucket_resources["none"];
         await add_resources_with_metadata_to_buckets(bucket_resources, metadata, communication).then(async () => {
-            const { access_token, token_type } = token_manager.getAccessToken(ldes_in_ldp_url, 'GET');
+            const { access_token, token_type } = token_manager.getAccessToken(ldes_in_ldp_url);
             const response = await fetch.get(ldes_in_ldp_url, {
                 Headers: {
                     'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
