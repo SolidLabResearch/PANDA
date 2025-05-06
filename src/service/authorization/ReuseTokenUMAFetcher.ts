@@ -124,9 +124,11 @@ export class ReuseTokenUMAFetcher {
         }
 
         const { access_token, token_type } = await rptResponse.json();
+
         console.log(`[Fetcher] Received RPT - Token Type: ${token_type}`);
 
         // Store the RPT for future use
+        this.tokenManagerService.setAccessToken(url, access_token, token_type);
         this.tokenManagerService.setRPT(ticket, { access_token, token_type });
 
         const headers = new Headers(init.headers);
