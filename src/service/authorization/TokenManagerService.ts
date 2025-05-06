@@ -51,4 +51,8 @@ export class TokenManagerService {
             this.containerTokens.clear();
         }
     }
+
+    getAllToken(){
+        return this.containerTokens;
+    }
 }
