@@ -358,6 +358,10 @@ export class WebSocketHandler {
             return url.replace(/(\/[^\/]+\/)([^\/]+)$/, '$1derived/$2');
         });
 
+        console.log(derivedResources);
+        console.log(containers_to_publish);
+        
+
         await Promise.all(
             derivedResources.map(container => {
                 this.preAuthorize(container, 'GET')
