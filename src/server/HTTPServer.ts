@@ -90,15 +90,16 @@ export class HTTPServer {
                         const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
 
                         const derived_target = this.toDerivedTarget(location_where_event_is_added);
-                        const {token_type, access_token} = TokenManagerService.getInstance().getAccessToken(derived_target)
-                        if (token_type && access_token){
-                            const latest_event_response = await this.uma_fetcher.fetch(derived_target, {
+                        const { token_type, access_token } = TokenManagerService.getInstance().getAccessToken(derived_target)
+                        if (token_type && access_token) {
+                            const latest_event_response = await fetch(derived_target, {
                                 method: 'GET',
                                 headers: {
+                                    'Authorization': `${token_type} ${access_token}`,
                                     'Accept': 'text/turtle'
                                 }
                             });
-    
+
                             const latest_event = await latest_event_response.text();
                             console.log(`The latest event is ${latest_event}`);
                             this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
@@ -111,7 +112,7 @@ export class HTTPServer {
                                     'Accept': 'text/turtle'
                                 }
                             });
-    
+
                             const latest_event = await latest_event_response.text();
                             console.log(`The latest event is ${latest_event}`);
                             this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);

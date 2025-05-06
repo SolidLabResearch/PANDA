@@ -91,7 +91,6 @@ export class WebSocketHandler {
                             const rules = ws_message.rules;
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
-                            // await this.authorizeFetch(streams);
                             await this.authorizeDerivedResource(streams);
                             console.log(`The access token is not defined. The request will be authorized.`);
                             this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
