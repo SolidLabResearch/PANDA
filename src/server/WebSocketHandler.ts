@@ -355,17 +355,21 @@ export class WebSocketHandler {
 
     public async authorizeDerivedResource(containers_to_publish: string[]) {
         const derivedResources: string[] = containers_to_publish.map(url => {
-            return url.replace(/(\/[^\/]+\/)([^\/]+)$/, '$1derived/$2');
+            const trimmed = url.endsWith('/') ? url.slice(0, -1) : url;
+            const parts = trimmed.split('/');
+            const lastSegment = parts.pop();
+            parts.push('derived', lastSegment!);
+            return parts.join('/');
         });
-
+    
         console.log(derivedResources);
         console.log(containers_to_publish);
-        
-
+    
         await Promise.all(
             derivedResources.map(container => {
-                this.preAuthorize(container, 'GET')
+                return this.preAuthorize(container, 'GET');
             })
-        )
+        );
     }
+    
 }
