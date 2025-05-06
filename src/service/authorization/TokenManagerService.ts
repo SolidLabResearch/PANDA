@@ -80,6 +80,10 @@ class TokenManagerService {
     public removeRPT(ticket: string): void {
         this.rptCache.delete(ticket);
     }
+
+    public getAllTokens(){
+        return this.accessTokenCache;
+    }
 }
 
 export { TokenManagerService };

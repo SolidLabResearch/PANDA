@@ -108,6 +108,8 @@ export class HTTPServer {
                             this.logger.info({}, 'webhook_notification_processed_and_emitted');
                         }}
                         else {
+                            console.log(TokenManagerService.getInstance().getAllTokens());
+                            
                             console.log('Cannot access the derived resource as the token does not exist.');
                         }
 
