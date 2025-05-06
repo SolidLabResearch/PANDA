@@ -77,7 +77,6 @@ export class HTTPServer {
                 });
                 req.on('end', async () => {
                     const webhook_notification_data = JSON.parse(body);
-                    console.log(`Webhook notification data: ${JSON.stringify(webhook_notification_data)}`);
                     this.logger.info({}, 'webhook_notification_data_received');
 
 
@@ -90,6 +89,8 @@ export class HTTPServer {
                         const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
 
                         const derived_target = this.toDerivedTarget(location_where_event_is_added);
+                        console.log(`Derived Target is: `, derived_target);
+                        
                         const { token_type, access_token } = TokenManagerService.getInstance().getAccessToken(derived_target)
                         if (token_type && access_token) {
                             const latest_event_response = await fetch(derived_target, {
