@@ -19,31 +19,37 @@ export class ReuseTokenUMAFetcher {
         console.log(`[Fetcher] Attempting to fetch: ${url}`);
 
         // Step 0: Try stored token first (check for existing token in cache)
-        const tokenInfo = this.tokenManagerService.getAccessToken(url);
-        console.log(`[Fetcher] Retrieved token info from TokenManager:`, tokenInfo);
+        let tokenInfo;
+        try {
+            tokenInfo = this.tokenManagerService.getAccessToken(url);
+        } catch (err) {
+            console.warn(`[Fetcher] No stored token for ${url}, proceeding with UMA flow.`);
+        }
 
-        // Check if we have a valid access token in the cache
-        if (tokenInfo.access_token && tokenInfo.token_type) {
-            const headers = new Headers(init.headers);
-            headers.set('Authorization', `${tokenInfo.token_type} ${tokenInfo.access_token}`);
+        if (tokenInfo) {
+            // Check if we have a valid access token in the cache
+            if (tokenInfo.access_token && tokenInfo.token_type) {
+                const headers = new Headers(init.headers);
+                headers.set('Authorization', `${tokenInfo.token_type} ${tokenInfo.access_token}`);
 
-            try {
-                const response = await fetch(url, { ...init, headers });
-                console.log(`[Fetcher] Response from stored token fetch: ${response.status}`);
+                try {
+                    const response = await fetch(url, { ...init, headers });
+                    console.log(`[Fetcher] Response from stored token fetch: ${response.status}`);
 
-                if (response.ok) {
-                    console.log(`[Fetcher] Stored token succeeded for ${url}`);
-                    return response;
+                    if (response.ok) {
+                        console.log(`[Fetcher] Stored token succeeded for ${url}`);
+                        return response;
+                    }
+
+                    if (response.status !== 401) {
+                        console.warn(`[Fetcher] Stored token failed, status: ${response.status}`);
+                        return response;
+                    }
+
+                    console.warn(`[Fetcher] Stored token rejected (401), falling back to UMA flow.`);
+                } catch (err) {
+                    console.error(`[Fetcher] Error using stored token:`, err);
                 }
-
-                if (response.status !== 401) {
-                    console.warn(`[Fetcher] Stored token failed, status: ${response.status}`);
-                    return response;
-                }
-
-                console.warn(`[Fetcher] Stored token rejected (401), falling back to UMA flow.`);
-            } catch (err) {
-                console.error(`[Fetcher] Error using stored token:`, err);
             }
         }
 
@@ -79,7 +85,7 @@ export class ReuseTokenUMAFetcher {
             console.log(`[Fetcher] Using previously cached RPT.`);
             const headers = new Headers(init.headers);
             headers.set('Authorization', `${existingRPT.token_type} ${existingRPT.access_token}`);
-            
+
             try {
                 console.log(`[Fetcher] Final request with cached RPT.`);
                 return await fetch(url, { ...init, headers });

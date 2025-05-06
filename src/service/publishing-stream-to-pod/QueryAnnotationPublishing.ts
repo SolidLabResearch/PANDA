@@ -100,10 +100,9 @@ export class QueryAnnotationPublishing {
         }
         delete bucket_resources["none"];
         await add_resources_with_metadata_to_buckets(bucket_resources, metadata, communication).then(async () => {
-            const { access_token, token_type } = token_manager.getAccessToken(ldes_in_ldp_url);
+            const token = token_manager.getAccessToken(ldes_in_ldp_url);
             const response = await fetch.get(ldes_in_ldp_url, {
                 Headers: {
-                    'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
                 }
             });
             const current_inbox_store = new Store();

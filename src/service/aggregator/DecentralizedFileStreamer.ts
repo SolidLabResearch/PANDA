@@ -297,7 +297,6 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async subscribe_webhook_notification(ldes_stream: string): Promise<void> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const webhook_notification_server = solid_server + "/.notifications/WebhookChannel2023/";
         const post_body = {
@@ -313,7 +312,6 @@ export class DecentralizedFileStreamer {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
                 'Access-Control-Allow-Origin': '*',
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             },
             body: JSON.stringify(post_body)
         });
@@ -328,8 +326,6 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer 
      */
     async get_stream_subscription_url(ldes_stream: string): Promise<string> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
-
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
         const post_body = {
@@ -343,12 +339,12 @@ export class DecentralizedFileStreamer {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
                 'Access-Control-Allow-Origin': '*',
-                'Authorization': `${token_type} ${access_token}`
             },
             body: JSON.stringify(post_body)
         });
         const response_json = await repsonse.json();
         return response_json.receiveFrom;
+
     }
 
     /**
@@ -375,7 +371,8 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     async get_inbox_subscription_notification_url(ldes_stream: string, inbox_container: string): Promise<string> {
-        const { access_token, token_type } = TokenManagerService.getInstance().getAccessToken(ldes_stream);
+
+
         const solid_server = ldes_stream.split("/").slice(0, 3).join("/");
         const notification_server = solid_server + "/.notifications/WebSocketChannel2023/";
         const post_body = {
@@ -389,13 +386,13 @@ export class DecentralizedFileStreamer {
                 'Content-Type': 'application/ld+json',
                 'Accept': 'application/ld+json',
                 'Access-Control-Allow-Origin': '*',
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             },
             body: JSON.stringify(post_body)
         })
 
         const response_json = await repsonse.json();
         return response_json.receiveFrom;
+
     }
     /**
      * Get the notification listening time when the DecentralizedFileStreamer started to listen to the notifications of when new events were being added to the Solid Pod.

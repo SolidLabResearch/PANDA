@@ -28,47 +28,50 @@ export async function extract_subscription_server(resource: string): Promise<Sub
 
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken(resource);
-        console.log(access_token, token_type);
 
-        const response = await axios.head(resource, {
-            headers: {
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
-            }
-        });
-        const link_header = response.headers['link'];
-        if (link_header) {
-            const link_header_parts = link_header.split(',');
-            for (const part of link_header_parts) {
-                const [link, rel] = part.split(';').map((item: string) => item.trim());
-                if (rel === 'rel="http://www.w3.org/ns/solid/terms#storageDescription"') {
-                    const storage_description_link = link.slice(1, -1); // remove the < and >\
-                    const storage_description_response = await axios.get(storage_description_link);
-                    const storage_description = storage_description_response.data;
-                    await parser.parse(storage_description, (error: any, quad: any) => {
-                        if (quad) {
-                            store.addQuad(quad);
-                        }
-                    });
-                    /**
-                     * Hardcoding now. 
-                     * Note to self that for notification protocol you need to have authorization to read the subscription server.
-                     */
-                    const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
-                    const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-                    const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-                    // const subscription_server = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#subscription', null)[0].object.value;
-                    // const subscription_type = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].object.value;
-                    // const channelLocation = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].subject.value;
-                    const subscription_response: SubscriptionServerNotification = {
-                        location: subscription_server,
-                        channelType: subscription_type,
-                        channelLocation: channelLocation
-                    }
-                    return subscription_response;
+        const token = token_manager.getAccessToken(resource);
+        if (token) {
+            const token_type = token?.token_type;
+            const access_token = token?.access_token;
+            const response = await axios.head(resource, {
+                headers: {
+                    'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
                 }
-                else {
-                    continue;
+            });
+            const link_header = response.headers['link'];
+            if (link_header) {
+                const link_header_parts = link_header.split(',');
+                for (const part of link_header_parts) {
+                    const [link, rel] = part.split(';').map((item: string) => item.trim());
+                    if (rel === 'rel="http://www.w3.org/ns/solid/terms#storageDescription"') {
+                        const storage_description_link = link.slice(1, -1); // remove the < and >\
+                        const storage_description_response = await axios.get(storage_description_link);
+                        const storage_description = storage_description_response.data;
+                        await parser.parse(storage_description, (error: any, quad: any) => {
+                            if (quad) {
+                                store.addQuad(quad);
+                            }
+                        });
+                        /**
+                         * Hardcoding now. 
+                         * Note to self that for notification protocol you need to have authorization to read the subscription server.
+                         */
+                        const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
+                        const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+                        const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
+                        // const subscription_server = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#subscription', null)[0].object.value;
+                        // const subscription_type = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].object.value;
+                        // const channelLocation = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].subject.value;
+                        const subscription_response: SubscriptionServerNotification = {
+                            location: subscription_server,
+                            channelType: subscription_type,
+                            channelLocation: channelLocation
+                        }
+                        return subscription_response;
+                    }
+                    else {
+                        continue;
+                    }
                 }
             }
         }
@@ -87,10 +90,9 @@ export async function extract_ldp_inbox(ldes_stream_location: string) {
 
     const store = new N3.Store();
     try {
-        const { access_token, token_type } = token_manager.getAccessToken(ldes_stream_location);
+        const token = token_manager.getAccessToken(ldes_stream_location);
         const response = await fetch(ldes_stream_location, {
             headers: {
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             }
         });
         if (response) {
@@ -129,7 +131,7 @@ export async function create_subscription(subscription_server: string, location:
             "topic": `${location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
         }
-        const { access_token, token_type } = token_manager.getAccessToken(location);
+        const token = token_manager.getAccessToken(location);
         const response = await fetch(subscription_server, {
             method: 'POST',
             headers: {

@@ -1,14 +1,14 @@
 class TokenManagerService {
     private static instance: TokenManagerService;
-    
+
     // A map to store access tokens for different URLs
     private accessTokenCache: Map<string, { access_token: string, token_type: string }> = new Map();
-    
+
     // A map to store RPTs based on ticket
     private rptCache: Map<string, { access_token: string, token_type: string }> = new Map();
 
     // Private constructor to prevent direct instantiation
-    private constructor() {}
+    private constructor() { }
 
     // Singleton pattern to ensure only one instance of TokenManagerService is created
     public static getInstance(): TokenManagerService {
@@ -25,7 +25,7 @@ class TokenManagerService {
      * @param token_type The type of the access token (e.g., 'Bearer').
      */
     public setAccessToken(url: string, access_token: string, token_type: string): void {
-        this.accessTokenCache.set(url, { access_token, token_type });
+        this.accessTokenCache.set(url, {access_token, token_type});
     }
 
     /**
@@ -34,10 +34,10 @@ class TokenManagerService {
      * @returns An object containing the access_token and token_type.
      * @throws Will throw an error if no access token is found for the given URL.
      */
-    public getAccessToken(url: string): { access_token: string, token_type: string } {
+    public getAccessToken(url: string): { access_token: string, token_type: string } | undefined {
         const token = this.accessTokenCache.get(url);
         if (!token) {
-            throw new Error(`Access token not found for URL: ${url}`);
+            console.log(`Access token not found for URL: ${url}`);
         }
         return token;
     }
@@ -57,10 +57,10 @@ class TokenManagerService {
      * @returns The RPT.
      * @throws Will throw an error if no RPT is found for the given ticket.
      */
-    public getRPT(ticket: string): { access_token: string, token_type: string } {
+    public getRPT(ticket: string): { access_token: string, token_type: string } | undefined {
         const rpt = this.rptCache.get(ticket);
         if (!rpt) {
-            throw new Error(`RPT not found for ticket: ${ticket}`);
+            console.log(`RPT not found for ticket: ${ticket}`);
         }
         return rpt;
     }

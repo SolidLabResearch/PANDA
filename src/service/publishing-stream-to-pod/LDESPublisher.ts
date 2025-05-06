@@ -125,11 +125,10 @@ export class LDESPublisher {
      * @memberof LDESPublisher 
      */
     public async update_latest_inbox(aggregation_pod_ldes_location: string) {
-        const { access_token, token_type } = token_manager.getAccessToken(aggregation_pod_ldes_location);
+        const token = token_manager.getAccessToken(aggregation_pod_ldes_location);
         const inbox_location: string[] = [];
         ldfetch.get(aggregation_pod_ldes_location, {
             headers: {
-                'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
             }
         }).then((response: any) => {
             for (const quad of response.triples) {
@@ -141,7 +140,6 @@ export class LDESPublisher {
             fetch(aggregation_pod_ldes_location, {
                 method: 'PATCH',
                 headers: {
-                    'Authorization': `${token_type} ${access_token}`, // Add the access token to the headers.
                     'Content-Type': 'application/sparql-update'
                 },
                 body: "INSERT DATA { <" + aggregation_pod_ldes_location + "> <http://www.w3.org/ns/ldp#inbox> <" + latest_inbox + "> }",

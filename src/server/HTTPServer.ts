@@ -91,12 +91,13 @@ export class HTTPServer {
                         const derived_target = this.toDerivedTarget(location_where_event_is_added);
                         console.log(`Derived Target is: `, derived_target);
 
-                        const { token_type, access_token } = TokenManagerService.getInstance().getAccessToken(derived_target)
-                        if (token_type && access_token) {
+                        const token = TokenManagerService.getInstance().getAccessToken(derived_target);
+                        if (token){
+                        if (token.token_type && token.access_token) {
                             const latest_event_response = await fetch(derived_target, {
                                 method: 'GET',
                                 headers: {
-                                    'Authorization': `${token_type} ${access_token}`,
+                                    'Authorization': `${token.token_type} ${token.access_token}`,
                                     'Accept': 'text/turtle'
                                 }
                             });
@@ -105,7 +106,7 @@ export class HTTPServer {
                             console.log(`The latest event is ${latest_event}`);
                             this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
                             this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                        }
+                        }}
                         else {
                             console.log('Cannot access the derived resource as the token does not exist.');
                         }
