@@ -21,6 +21,9 @@ export class ContinuousAnomalyMonitoringService {
             format: 'text/n3',
         });
 
+        console.log(`Data to be reasoned over is ${data}`);
+        console.log(`Rules to be reasoned are ${this.n3_rules}`);
+        
         const store = new N3.Store();
         let rules = n3_parser.parse(this.n3_rules);        
         let data_parsed = n3_parser.parse(data);
@@ -37,6 +40,9 @@ export class ContinuousAnomalyMonitoringService {
             output: 'derivations',
             outputType: 'quads',
         }));
+
+        console.log(`Inferred event is ${storeToString(inferredStore)}`);
+        
 
 
         return storeToString(inferredStore);

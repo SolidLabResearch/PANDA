@@ -142,6 +142,7 @@ export class AggregatorInstantiator {
                         const reasoner = new ContinuousAnomalyMonitoringService(this.rules);
                         const reasoned_result = await reasoner.reason(aggregation_event);
                         console.log(`Reasoned Result is ${reasoned_result}`);
+                        process.exit();
                         
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,

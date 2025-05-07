@@ -67,4 +67,20 @@ test('activity_index', async () => {
     const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
     const result = await n3_reasoner.reason(data);
     expect(result).toBe(result);
+});
+
+test('dummy test', async() => {
+
+const data = `
+<https://rsp.js/aggregation_event/first> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://saref.etsi.org/core/Measurement> .
+    <https://rsp.js/aggregation_event/first> <https://saref.etsi.org/core/hasTimestamp> "Date"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/first> <https://saref.etsi.org/core/hasValue> "8"^^<http://www.w3.org/2001/XMLSchema#float> .
+    <https://rsp.js/aggregation_event/first> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://argahsuknesib.github.io/asdo/AggregatorService> .
+    <https://rsp.js/aggregation_event/first> <http://w3id.org/rsp/vocals-sd#startedAt> "Date.First"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/first> <http://w3id.org/rsp/vocals-sd#endedAt> "Date.Second"^^<http://www.w3.org/2001/XMLSchema#dateTime> .`;
+    const rules = `{?s ?p ?o } => {?s ?p ?s}.`;
+    const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
+    const result = await n3_reasoner.reason(data);
+    console.log(result);
+    
 })
