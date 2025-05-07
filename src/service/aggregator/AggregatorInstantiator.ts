@@ -116,7 +116,9 @@ export class AggregatorInstantiator {
                 for (const item of iterable) {
                     const aggregation_event_timestamp = new Date().getTime();
                     const data = item.value;
+                    console.log(`Event Generated is ${data}`);
                     const aggregation_event = this.generate_aggregation_event(data, aggregation_event_timestamp, this.stream_array, window_timestamp_from, window_timestamp_to);
+                    console.log(`Aggregation Event is ${aggregation_event}`)
                     if (this.rules = '') {
                         const fetched_rules = await this.fetch_rules_from_query(this.query);
                         if (fetched_rules) {
@@ -139,6 +141,8 @@ export class AggregatorInstantiator {
                     else {
                         const reasoner = new ContinuousAnomalyMonitoringService(this.rules);
                         const reasoned_result = await reasoner.reason(aggregation_event);
+                        console.log(`Reasoned Result is ${reasoned_result}`);
+                        
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result,
