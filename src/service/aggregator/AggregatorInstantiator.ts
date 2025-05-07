@@ -143,7 +143,7 @@ export class AggregatorInstantiator {
                         const reasoned_result = await reasoner.reason(aggregation_event);
                         console.log(`Reasoned Result is ${reasoned_result}`);
                         process.exit();
-                        
+
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result,
@@ -217,29 +217,38 @@ export class AggregatorInstantiator {
      * @returns {string} - The aggregation event in string RDF.
      * @memberof AggregatorInstantiator
      */
-    generate_aggregation_event(value: string, event_timestamp: number, stream_array: string[] | undefined, timestamp_from: number, timestamp_to: number): string {
+    generate_aggregation_event(
+        value: string,
+        event_timestamp: number,
+        stream_array: string[] | undefined,
+        timestamp_from: number,
+        timestamp_to: number
+    ): string {
         if (stream_array === undefined) {
-            throw new Error("The stream array is undefined. ");
-        }
-        else {
+            throw new Error("The stream array is undefined.");
+        } else {
             const timestamp_date = new Date(event_timestamp).toISOString();
             const timestamp_from_date = new Date(timestamp_from).toISOString();
             const timestamp_to_date = new Date(timestamp_to).toISOString();
             const uuid_random = uuidv4();
+
             let aggregation_event = `
-        <https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://saref.etsi.org/core/Measurement> .
-        <https://rsp.js/aggregation_event/${uuid_random}> <https://saref.etsi.org/core/hasTimestamp> "${timestamp_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-        <https://rsp.js/aggregation_event/${uuid_random}> <https://saref.etsi.org/core/hasValue> "${value}"^^<http://www.w3.org/2001/XMLSchema#float> .
-        <https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://argahsuknesib.github.io/asdo/AggregatorService> .
-        <https://rsp.js/aggregation_event/${uuid_random}> <http://w3id.org/rsp/vocals-sd#startedAt> "${timestamp_from_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-        <https://rsp.js/aggregation_event/${uuid_random}> <http://w3id.org/rsp/vocals-sd#endedAt> "${timestamp_to_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-        `;
+    <https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://saref.etsi.org/core/Measurement> .
+    <https://rsp.js/aggregation_event/${uuid_random}> <https://saref.etsi.org/core/hasTimestamp> "${timestamp_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/${uuid_random}> <https://saref.etsi.org/core/hasValue> "${value}"^^<http://www.w3.org/2001/XMLSchema#float> .
+    <https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://argahsuknesib.github.io/asdo/AggregatorService> .
+    <https://rsp.js/aggregation_event/${uuid_random}> <http://w3id.org/rsp/vocals-sd#startedAt> "${timestamp_from_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/${uuid_random}> <http://w3id.org/rsp/vocals-sd#endedAt> "${timestamp_to_date}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    `;
+
             for (const stream of stream_array) {
-                aggregation_event += `<https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/ns/prov#generatedBy> <${stream}> .`
+                aggregation_event += `<https://rsp.js/aggregation_event/${uuid_random}> <http://www.w3.org/ns/prov#generatedBy> <${stream}> .\n`;
             }
-            return aggregation_event;
+
+            return aggregation_event.trim();
         }
     }
+
     /**
      * Connect with the Websocket server of the Solid Stream Aggregator.
      * @param {string} wssURL - The URL of the Websocket server of the Solid Stream Aggregator.
