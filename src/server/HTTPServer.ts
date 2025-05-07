@@ -103,7 +103,7 @@ export class HTTPServer {
                             });
 
                             const latest_event = await latest_event_response.text();
-                            console.log(`The latest event is ${latest_event}`);
+                            console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token}`);
                             this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
                             this.logger.info({}, 'webhook_notification_processed_and_emitted');
                         }}
