@@ -101,21 +101,33 @@ export class HTTPServer {
                                         'Accept': 'text/turtle'
                                     }
                                 });
-
-                                const latest_event = await latest_event_response.text();
-                                console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token.access_token}, ${token.token_type}`);
-                                this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                                this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                                if (latest_event_response.status === 200 || latest_event_response.status === 201 || latest_event_response.status === 203 || latest_event_response.status === 204) {
+                                    const latest_event = await latest_event_response.text();
+                                    console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token.access_token}, ${token.token_type}`);
+                                    this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
+                                    this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                                }
+                                else {
+                                    const new_token_response = await this.uma_fetcher.fetch(derived_target, {
+                                        method: 'GET',
+                                        headers: {
+                                        'Accept': 'text/turtle'
+                                        }
+                                    });
+                                    const latest_event = await new_token_response.text();
+                                    console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token.access_token}, ${token.token_type}`);
+                                    this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
+                                    this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                                }
                             }
-                        }
-                        else {
-                            console.log(TokenManagerService.getInstance().getAllTokens());
+                            else {
+                                console.log(TokenManagerService.getInstance().getAllTokens());
 
-                            console.log('Cannot access the derived resource as the token does not exist.');
-                        }
+                                console.log('Cannot access the derived resource as the token does not exist.');
+                            }
 
-                    }
-                });
+                        }
+                    });
                 break;
             default:
                 res.writeHead(405, { 'Content-Type': 'text/plain' });
