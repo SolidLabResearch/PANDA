@@ -140,6 +140,8 @@ export class AggregatorInstantiator {
                     }
                     else {
                         const reasoner = new ContinuousAnomalyMonitoringService(this.rules);
+                        console.log(this.rules);
+                        
                         const reasoned_result = await reasoner.reason(aggregation_event);
                         console.log(`Reasoned Result is ${reasoned_result}`);
                         process.exit();

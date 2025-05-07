@@ -72,12 +72,15 @@ test('activity_index', async () => {
 test('dummy test', async() => {
 
 const data = `
-<https://rsp.js/aggregation_event/first> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://saref.etsi.org/core/Measurement> .
-    <https://rsp.js/aggregation_event/first> <https://saref.etsi.org/core/hasTimestamp> "Date"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-    <https://rsp.js/aggregation_event/first> <https://saref.etsi.org/core/hasValue> "8"^^<http://www.w3.org/2001/XMLSchema#float> .
-    <https://rsp.js/aggregation_event/first> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://argahsuknesib.github.io/asdo/AggregatorService> .
-    <https://rsp.js/aggregation_event/first> <http://w3id.org/rsp/vocals-sd#startedAt> "Date.First"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
-    <https://rsp.js/aggregation_event/first> <http://w3id.org/rsp/vocals-sd#endedAt> "Date.Second"^^<http://www.w3.org/2001/XMLSchema#dateTime> .`;
+<https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://saref.etsi.org/core/Measurement> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <https://saref.etsi.org/core/hasTimestamp> "2025-05-07T10:48:30.658Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <https://saref.etsi.org/core/hasValue> "38.1051177665153"^^<http://www.w3.org/2001/XMLSchema#float> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://argahsuknesib.github.io/asdo/AggregatorService> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://w3id.org/rsp/vocals-sd#startedAt> "1970-01-01T00:00:00.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://w3id.org/rsp/vocals-sd#endedAt> "1970-01-01T00:00:20.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#generatedBy> <http://n063-02b.wall2.ilabt.iminds.be:3000/alice/acc-x/> .
+<https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#generatedBy> <http://n063-02b.wall2.ilabt.iminds.be:3000/alice/acc-y/> .
+<https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#generatedBy> <http://n063-02b.wall2.ilabt.iminds.be:3000/alice/acc-z/> .` ;
     const rules = `{?s ?p ?o } => {?s ?p ?s}.`;
     const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
     const result = await n3_reasoner.reason(data);

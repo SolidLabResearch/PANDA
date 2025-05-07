@@ -89,6 +89,7 @@ export class WebSocketHandler {
                             const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
+                            console.log(rules);
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
                             await this.authorizeDerivedResource(streams);
