@@ -111,13 +111,18 @@ export class HTTPServer {
                                     const new_token_response = await this.uma_fetcher.fetch(derived_target, {
                                         method: 'GET',
                                         headers: {
-                                        'Accept': 'text/turtle'
+                                            'Accept': 'text/turtle'
                                         }
                                     });
-                                    const latest_event = await new_token_response.text();
-                                    console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token.access_token}, ${token.token_type}`);
-                                    this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                                    this.logger.info({}, 'webhook_notification_processed_and_emitted');
+
+                                    if (new_token_response.ok) {
+                                        const latest_event = await new_token_response.text();
+                                        console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} after fetching new token`);
+                                        this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
+                                        this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                                    } else {
+                                        console.error(`Failed to fetch resource even after getting new token. Status: ${new_token_response.status}`);
+                                    }
                                 }
                             }
                             else {
@@ -127,7 +132,8 @@ export class HTTPServer {
                             }
 
                         }
-                    });
+                    }
+                });
                 break;
             default:
                 res.writeHead(405, { 'Content-Type': 'text/plain' });
