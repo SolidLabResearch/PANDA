@@ -1,15 +1,24 @@
 import { storeToString } from "@treecg/ldes-snapshot";
-import { n3reasoner, runQuery, SwiplEye } from "eyereasoner";
+import { n3reasoner } from "eyereasoner";
 const N3 = require('n3');
 
 export class ContinuousAnomalyMonitoringService {
-    public n3_rules: string
-    constructor(rules: string) {
+    private static instance: ContinuousAnomalyMonitoringService;
+    private n3_rules: string;
+
+    private constructor(rules: string) {
         this.n3_rules = rules;
     }
 
+    public static getInstance(rules: string): ContinuousAnomalyMonitoringService {
+        if (!ContinuousAnomalyMonitoringService.instance) {
+            ContinuousAnomalyMonitoringService.instance = new ContinuousAnomalyMonitoringService(rules);
+        }
+        return ContinuousAnomalyMonitoringService.instance;
+    }
+
     public get rules(): string {
-        return this.n3_rules
+        return this.n3_rules;
     }
 
     public set rules(rules: string) {
@@ -17,16 +26,14 @@ export class ContinuousAnomalyMonitoringService {
     }
 
     public async reason(data: string): Promise<string> {
-        let n3_parser = new N3.Parser({
-            format: 'text/n3',
-        });
+        const n3_parser = new N3.Parser({ format: 'text/n3' });
 
         console.log(`Data to be reasoned over is ${data}`);
         console.log(`Rules to be reasoned are ${this.n3_rules}`);
         
         const store = new N3.Store();
-        let rules = n3_parser.parse(this.n3_rules);        
-        let data_parsed = n3_parser.parse(data);
+        const rules = n3_parser.parse(this.n3_rules);
+        const data_parsed = n3_parser.parse(data);
 
         for (let elem of rules) {
             store.addQuad(elem);
@@ -35,17 +42,14 @@ export class ContinuousAnomalyMonitoringService {
         for (let elem of data_parsed) {
             store.addQuad(elem);
         }
-        
+
         const inferredStore = new N3.Store(await n3reasoner(store.getQuads(), undefined, {
             output: 'derivations',
             outputType: 'quads',
         }));
 
         console.log(`Inferred event is ${storeToString(inferredStore)}`);
-        
-
 
         return storeToString(inferredStore);
     }
-
 }

@@ -122,7 +122,7 @@ export class AggregatorInstantiator {
                     if (this.rules = '') {
                         const fetched_rules = await this.fetch_rules_from_query(this.query);
                         if (fetched_rules) {
-                            const reasoner = new ContinuousAnomalyMonitoringService(fetched_rules);
+                            const reasoner = ContinuousAnomalyMonitoringService.getInstance(fetched_rules);
                             const reasoned_result = await reasoner.reason(aggregation_event);
                             const aggregation_object: aggregation_object = {
                                 query_hash: this.hash_string,
@@ -139,9 +139,9 @@ export class AggregatorInstantiator {
                         }
                     }
                     else {
-                        const reasoner = new ContinuousAnomalyMonitoringService(this.rules);
+                        const reasoner = ContinuousAnomalyMonitoringService.getInstance(this.rules);
                         console.log(this.rules);
-                        
+
                         const reasoned_result = await reasoner.reason(aggregation_event);
                         console.log(`Reasoned Result is ${reasoned_result}`);
                         process.exit();

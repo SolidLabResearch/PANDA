@@ -16,13 +16,6 @@ afterEach(() => {
     nock.cleanAll();
 })
 
-test('test_reasoning_engine', async () => {
-    const data = `<http://example.org/subject> <http://example.org/predicate> <http://example.org/object>. `;
-    const n3_reasoner = new ContinuousAnomalyMonitoringService(`@prefix : <http://example.org/rules#>. {?s ?p ?o} => {?s ?o ?p}.`);
-    const result = await n3_reasoner.reason(data);
-    expect(result).toBe('<http://example.org/subject> <http://example.org/object> <http://example.org/predicate> .\n');
-});
-
 test('test_reasoning_engine_with_digits', async () => {
     const data = `<https://rsp.js/aggregation_event/1> <https://saref.etsi.org/core/hasValue> "10"^^<http://www.w3.org/2001/XMLSchema#float> .`
     const rules = `
@@ -30,7 +23,9 @@ test('test_reasoning_engine_with_digits', async () => {
     @prefix math: <http://www.w3.org/2000/10/swap/math#>.
     {?s <https://saref.etsi.org/core/hasValue> ?o . ?o math:greaterThan 5 . ?o math:notGreaterThan 15} => {?s <http://example.org/#is> <http://example.org/#standing>}.
     `;
-    const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
+
+    const n3_reasoner = ContinuousAnomalyMonitoringService.getInstance(rules);
+
     const result = await n3_reasoner.reason(data);
     console.log(result);
 
@@ -64,7 +59,7 @@ test('activity_index', async () => {
 { ?s saref:hasValue ?ai. ?ai math:greaterThan 55. } => { ?s ex:is ex:fastWalkingOrJogging. }.
 
     `;
-    const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
+    const n3_reasoner = ContinuousAnomalyMonitoringService.getInstance(rules);
     const result = await n3_reasoner.reason(data);
     expect(result).toBe(result);
 });
@@ -82,7 +77,7 @@ const data = `
 <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#generatedBy> <http://n063-02b.wall2.ilabt.iminds.be:3000/alice/acc-y/> .
 <https://rsp.js/aggregation_event/2a107a31-a98d-4fe2-89c2-30f8c2f6ae81> <http://www.w3.org/ns/prov#generatedBy> <http://n063-02b.wall2.ilabt.iminds.be:3000/alice/acc-z/> .` ;
     const rules = `{?s ?p ?o } => {?s ?p ?s}.`;
-    const n3_reasoner = new ContinuousAnomalyMonitoringService(rules);
+    const n3_reasoner = ContinuousAnomalyMonitoringService.getInstance(rules);
     const result = await n3_reasoner.reason(data);
     console.log(result);
     

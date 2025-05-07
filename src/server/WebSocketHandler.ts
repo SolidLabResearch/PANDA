@@ -13,6 +13,7 @@ import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
 import * as AGG_CONFIG from '../config/pod_credentials.json';
 import * as dotenv from 'dotenv';
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
+import { ContinuousAnomalyMonitoringService } from "../service/reasoner/ContinuousAnomalyMonitoringService";
 dotenv.config();
 
 /**
@@ -90,6 +91,7 @@ export class WebSocketHandler {
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
                             console.log(rules);
+                            let monitoringService = ContinuousAnomalyMonitoringService.getInstance(rules);
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
                             await this.authorizeDerivedResource(streams);
