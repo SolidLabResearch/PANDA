@@ -99,11 +99,12 @@ export class ReuseTokenUMAFetcher {
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
-            claim_token: typeof this.claim.token === 'string'
-                ? this.claim.token
-                : JSON.stringify(this.claim.token),
+            claim_token: this.claim.token,
             claim_token_format: this.claim.token_format,
         };
+
+        console.log(rptRequestBody);
+        
 
         let rptResponse: Response;
         try {
