@@ -98,10 +98,7 @@ export class HTTPServer {
                                 console.log(token.token_type);
                                 console.log(token.access_token);
                                 console.log(`Authorization: ${token.token_type} ${token.access_token}`);
-
-
-
-
+                                
                                 const latest_event_response = await fetch(derived_target, {
 
                                     method: 'GET',

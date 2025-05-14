@@ -1,6 +1,6 @@
 import { fetch } from 'cross-fetch';
 import { TokenManagerService } from './TokenManagerService';
-import { UserManagedAccessFetcher, Claim, parseAuthenticateHeader } from './UserManagedAccessFetcher';
+import { Claim, parseAuthenticateHeader } from './UserManagedAccessFetcher';
 
 /**
  * UMA Fetcher that first attempts to reuse a previously issued access token
@@ -99,7 +99,9 @@ export class ReuseTokenUMAFetcher {
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
-            claim_token: encodeURIComponent(this.claim.token),
+            claim_token: typeof this.claim.token === 'string'
+                ? this.claim.token
+                : JSON.stringify(this.claim.token),
             claim_token_format: this.claim.token_format,
         };
 
