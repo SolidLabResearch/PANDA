@@ -1,6 +1,6 @@
 # PANDA
 
-The repository contains the code for the Privacy-preserving platform for ANomaly Detection in healthcare streAms (PANDA) platform, which is a service 
+The repository contains the code for the Privacy-preserving platform for ANomaly Detection in healthcare streAms (PANDA) platform, which is a service vor monitoring the health of patients to detect anomalies in their health data streams. To enable privacy, PANDA utilizes [Solid](https://solidproject.org/) as a data storage solution and extends it with [User Managed Access](https://github.com/solidLabResearch/user-managed-access) to allow the patients to specify granular access control policies for their data streams. 
 
 
 ## Linting
