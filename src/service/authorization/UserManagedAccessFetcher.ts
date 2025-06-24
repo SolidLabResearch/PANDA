@@ -15,7 +15,7 @@ import { TokenManagerService } from './TokenManagerService';
  * @returns {Object} The decoded payload of the JWT as a JavaScript object.
  *
  */
-export function parseJwt(token: string): Object {
+export function parseJwt(token: string): object {
     return JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
 }
 

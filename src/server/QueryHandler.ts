@@ -41,7 +41,7 @@ export class QueryHandler {
      */
     public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any) {
         const aggregation_dispatcher = new AggregationDispatcher(query);
-        let to_timestamp = new Date().getTime(); // current time
+        const to_timestamp = new Date().getTime(); // current time
         const from_timestamp = new Date(to_timestamp - (width)).getTime(); // latest seconds ago
         const query_hashed = hash_string_md5(query);
         const is_query_unique = query_registry.register_query(query, rules, query_registry, from_timestamp, to_timestamp, logger, query_type, event_emitter);

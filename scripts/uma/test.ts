@@ -1,4 +1,4 @@
-/* eslint-disable max-len */
+ 
 
 import { fetch } from 'cross-fetch';
 import { Parser, Writer, Store } from 'n3';

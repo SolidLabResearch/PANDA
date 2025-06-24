@@ -1,10 +1,7 @@
-# Privacy Preserved Healthcare Stream Monitoring
+# PANDA
 
-The repository contains the code for the Privacy Enabled Streaming Service for a Dashboard. The streaming service enables query processing and reasoning over the streams.
+The repository contains the code for the Privacy-preserving platform for ANomaly Detection in healthcare streAms (PANDA) platform, which is a service 
 
-## Tests
-
-The tests for the Privacy Enabled Streaming Service for a Dashboard are written using the Jest framework. The coverage isn't 100% yet, but will be done in the recent future.
 
 ## Linting
 

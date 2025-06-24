@@ -91,7 +91,7 @@ export class WebSocketHandler {
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
                             console.log(rules);
-                            let monitoringService = ContinuousAnomalyMonitoringService.getInstance(rules);
+                            const monitoringService = ContinuousAnomalyMonitoringService.getInstance(rules);
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
                             await this.authorizeDerivedResource(streams);
@@ -321,7 +321,7 @@ export class WebSocketHandler {
 
         if (stream_match !== null) {
             const stream_location = stream_match[1]; // Extracts the stream URL
-            let webID = stream_location.replace(/\/[^/]+\/?$/, '/profile/card#me');
+            const webID = stream_location.replace(/\/[^/]+\/?$/, '/profile/card#me');
             return { stream_location, webID };
         }
         else {
@@ -331,7 +331,7 @@ export class WebSocketHandler {
 
     public return_streams(rspql_query: string): string[] {
         const parser = new RSPQLParser();
-        let parsed = parser.parse(rspql_query);
+        const parsed = parser.parse(rspql_query);
         return parsed.s2r.map((stream: any) => stream.stream_name);
     }
 

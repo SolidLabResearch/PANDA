@@ -35,11 +35,11 @@ export class ContinuousAnomalyMonitoringService {
         const rules = n3_parser.parse(this.n3_rules);
         const data_parsed = n3_parser.parse(data);
 
-        for (let elem of rules) {
+        for (const elem of rules) {
             store.addQuad(elem);
         }
 
-        for (let elem of data_parsed) {
+        for (const elem of data_parsed) {
             store.addQuad(elem);
         }
 

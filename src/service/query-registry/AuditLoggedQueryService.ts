@@ -4,6 +4,8 @@ import { AggregatorInstantiator } from "../aggregator/AggregatorInstantiator";
 import { is_equivalent } from "rspql-query-equivalence";
 import { WriteLockArray } from "../../utils/query-registry/Util";
 import { hash_string_md5 } from "../../utils/Util";
+import * as fs from 'fs';
+import * as path from 'path';
 const websocketConnection = require('websocket').connection;
 const WebSocketClient = require('websocket').client;
 /**
@@ -21,6 +23,7 @@ export class AuditLoggedQueryService {
     query_hash_map: Map<string, string>;
     static connection: typeof websocketConnection;
     public static client: any = new WebSocketClient();
+    private logFilePath = path.resolve(__dirname, '../../../../query_audit_log.json');
 
     /**
      * Creates an instance of AuditLoggedQueryService.
@@ -61,6 +64,17 @@ export class AuditLoggedQueryService {
             */
             logger.info({}, 'query_is_unique');
             new AggregatorInstantiator(rspql_query, rules, from_timestamp, to_timestamp, logger, query_type, event_emitter);
+
+            const query_id = hash_string_md5(rspql_query + from_timestamp + to_timestamp);
+            const logEntry = {
+                query_id,
+                query: rspql_query,
+                registered_by: 'healthcare-worker',
+                timestamp: new Date().toISOString(),
+                similar_queries_id: [],
+                access_log: []
+            };
+            this.logQueryRegistration(logEntry);
             this.auditQueryLog();
             return true;
         }
@@ -159,8 +173,45 @@ export class AuditLoggedQueryService {
         }
     }
 
-    public auditQueryLog() {
+    /**
+     * Log a query registration to the audit log file.
+     */
+    logQueryRegistration(entry: QueryLogEntry) {
+        let logs: QueryLogEntry[] = [];
+        if (fs.existsSync(this.logFilePath)) {
+            try {
+                const data = fs.readFileSync(this.logFilePath, 'utf-8');
+                logs = JSON.parse(data);
+            } catch (e) {
+                logs = [];
+            }
+        }
+        logs.push(entry);
+        fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
+    }
 
+    /**
+     * Log an access event for a query to the audit log file.
+     */
+    logAccess(queryId: string, access: { user: string; timestamp: string; data_accessed: string }) {
+        let logs: QueryLogEntry[] = [];
+        if (fs.existsSync(this.logFilePath)) {
+            try {
+                const data = fs.readFileSync(this.logFilePath, 'utf-8');
+                logs = JSON.parse(data);
+            } catch (e) {
+                logs = [];
+            }
+        }
+        const log = logs.find(q => q.query_id === queryId);
+        if (log) {
+            log.access_log.push(access);
+            fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
+        }
+    }
+
+    public auditQueryLog() {
+        // You can call logQueryRegistration or logAccess here as needed
     }
 
     /**
@@ -217,4 +268,17 @@ export class AuditLoggedQueryService {
         });
     }
 
+}
+
+interface QueryLogEntry {
+  query_id: string;
+  query: string;
+  registered_by: string;
+  timestamp: string;
+  similar_queries_id: string[];
+  access_log: Array<{
+    user: string;
+    timestamp: string;
+    data_accessed: string;
+  }>;
 }

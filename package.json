@@ -15,8 +15,8 @@
         "restart-solid-server": "cd scripts && npx community-solid-server --config ./pod/config/unsafe.json -f ./data/ -w 0",
         "start-solid-server-extended-lock": "cd scripts && rm -rf data/.internal/ && npx community-solid-server --config ./pod/config/extendedlock.json -f ./data/ --seededPodConfigJson ./pod/pod_credentials.json",
         "test-run": "cd scripts && rm -rf data/.internal/ && npx community-solid-server --config ./pod/config/auth.json -f ./data/ --seededPodConfigJson ./pod/pod_credentials.json --workers 1",
-        "lint:ts": "eslint . --report-unused-disable-directives --max-warnings 0",
-        "lint:ts:fix": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0 --fix",
+        "lint:ts": "npx eslint . --report-unused-disable-directives --max-warnings 0",
+        "lint:ts:fix": "npx eslint . --ext ts --report-unused-disable-directives --max-warnings 0 --fix",
         "lint:no-warning": "eslint . --ext ts --quiet --max-warnings 0"
     },
     "keywords": [],
