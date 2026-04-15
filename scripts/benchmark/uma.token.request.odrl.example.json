@@ -1,0 +1,23 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Request",
+  "profile": {
+    "@id": "https://w3id.org/oac#"
+  },
+  "uid": "urn:uuid:replace-me",
+  "description": "ODRL request benchmark payload example",
+  "permission": [
+    {
+      "@type": "Permission",
+      "uid": "urn:uuid:replace-me-permission",
+      "target": "http://localhost:3000/ruben/medical/smartwatch.ttl",
+      "action": {
+        "@id": "https://w3id.org/oac#read"
+      },
+      "assigner": "http://localhost:3000/ruben/profile/card#me",
+      "assignee": "http://localhost:3000/alice/profile/card#me"
+    }
+  ],
+  "claim_token": "<replace-with-claim-token>",
+  "claim_token_format": "urn:solidlab:uma:claims:formats:jwt"
+}

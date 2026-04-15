@@ -14,6 +14,7 @@ import * as AGG_CONFIG from '../config/pod_credentials.json';
 import * as dotenv from 'dotenv';
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 import { ContinuousAnomalyMonitoringService } from "../service/reasoner/ContinuousAnomalyMonitoringService";
+import { getUmaClaim } from "../config/UmaClaim";
 dotenv.config();
 
 /**
@@ -48,10 +49,7 @@ export class WebSocketHandler {
         this.websocket_server = websocket_server;
         this.event_emitter = event_emitter;
         this.token_manager = TokenManagerService.getInstance();
-        this.uma_fetcher = new ReuseTokenUMAFetcher({
-            token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
-            token_format: "urn:solidlab:uma:claims:formats:webid"
-        });
+        this.uma_fetcher = new ReuseTokenUMAFetcher(getUmaClaim());
         this.aggregation_publisher = aggregation_publisher;
         this.connections = new Map<string, WebSocket[]>();
         this.parser = new RSPQLParser();
@@ -363,13 +361,23 @@ export class WebSocketHandler {
             parts.push('derived', lastSegment!);
             return parts.join('/');
         });
-    
+
         console.log(derivedResources);
         console.log(containers_to_publish);
-    
+
         await Promise.all(
-            derivedResources.map(container => {
-                return this.preAuthorize(container, 'GET');
+            derivedResources.map(async (container, index) => {
+                try {
+                    await this.preAuthorize(container, 'GET');
+                } catch (error) {
+                    const fallback = containers_to_publish[index];
+                    console.warn(`[UMA] Derived pre-authorization failed for ${container}. Falling back to stream ${fallback}.`, error);
+                    try {
+                        await this.preAuthorize(fallback, 'GET');
+                    } catch (fallbackError) {
+                        console.warn(`[UMA] Fallback pre-authorization failed for ${fallback}. Continuing without pre-authorization.`, fallbackError);
+                    }
+                }
             })
         );
     }

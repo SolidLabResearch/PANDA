@@ -31,10 +31,10 @@ describe('Util_Functions', () => {
 
         const mockGetResponse = {
             data: `
-            <http://localhost:3000/aggregation_pod/> a <http://www.w3.org/ns/pim/space#Storage>;
-        <http://www.w3.org/ns/solid/notifications#subscription> <http://localhost:3000/.notifications/WebhookChannel2023/>.
-        <http://localhost:3000/.notifications/WebhookChannel2023/> <http://www.w3.org/ns/solid/notifications#channelType> <http://www.w3.org/ns/solid/notifications#WebhookChannel2023>;
-        <http://www.w3.org/ns/solid/notifications#feature> <http://www.w3.org/ns/solid/notifications#accept>, <http://www.w3.org/ns/solid/notifications#endAt>, <http://www.w3.org/ns/solid/notifications#rate>, <http://www.w3.org/ns/solid/notifications#startAt>, <http://www.w3.org/ns/solid/notifications#state>.
+            <http://localhost:3000/aggregation_pod/> a <http://www.w3.org/ns/pim/space#Storage> ;
+                <http://www.w3.org/ns/solid/notifications#subscription> <http://localhost:3000/.notifications/WebhookChannel2023/> .
+            <http://localhost:3000/.notifications/WebhookChannel2023/>
+                <http://www.w3.org/ns/solid/notifications#channelType> <http://www.w3.org/ns/solid/notifications#WebhookChannel2023> .
             `
         };
         
@@ -43,8 +43,8 @@ describe('Util_Functions', () => {
         jest.spyOn(console, 'error').mockImplementation(() => { });
 
         const result = await extract_subscription_server('http://localhost:3000/aggregation_pod/');
-        expect(axios.head).toHaveBeenCalledWith('http://localhost:3000/aggregation_pod/');
-        expect(axios.get).toHaveBeenCalledWith('http://localhost:3000/aggregation_pod/.well-known/solid');
+        expect(axios.head).toHaveBeenCalledWith('http://localhost:3000/aggregation_pod/', { headers: {} });
+        expect(axios.get).toHaveBeenCalledWith('http://localhost:3000/aggregation_pod/.well-known/solid', { headers: {} });
         expect(console.error).not.toHaveBeenCalled();
         expect(result).toEqual({
             location: 'http://localhost:3000/.notifications/WebhookChannel2023/',
@@ -61,7 +61,7 @@ describe('Util_Functions', () => {
             'Error while extracting subscription server.'
         );
 
-        expect(axios.head).toHaveBeenCalledWith('http://example.com/resource');
+        expect(axios.head).toHaveBeenCalledWith('http://example.com/resource', { headers: {} });
         expect(console.error).toHaveBeenCalled();
     });
 
@@ -78,7 +78,7 @@ describe('Util_Functions', () => {
     
         const result = await extract_ldp_inbox('http://example.com/resource');
     
-        expect(global.fetch).toHaveBeenCalledWith('http://example.com/resource');
+        expect(global.fetch).toHaveBeenCalledWith('http://example.com/resource', { headers: {} });
         expect(console.error).not.toHaveBeenCalled();
         expect(result).toBe('http://example.com/resourceinbox');
     });
@@ -102,7 +102,7 @@ describe('Util_Functions', () => {
                 "@context": ["https://www.w3.org/ns/solid/notification/v1"],
                 "type": "http://www.w3.org/ns/solid/notifications#WebhookChannel2023",
                 "topic": `${mockInboxLocation}`,
-                "sendTo": "http://localhost:8085/"
+                "sendTo": "http://n063-08a.wall2.ilabt.iminds.be:8080/"
             })
         });
         expect(console.error).not.toHaveBeenCalled();
