@@ -1,0 +1,2 @@
+iteration,phase,challenge_status,token_status,authorized_status,policy_post_latency_ms,initial_challenge_latency_ms,token_exchange_latency_ms,authorized_request_latency_ms,total_flow_latency_ms,note
+1,measured,401,200,200,0,555.3612920045853,520.3491669893265,9.384958982467651,1086.2300419807434,"ok"

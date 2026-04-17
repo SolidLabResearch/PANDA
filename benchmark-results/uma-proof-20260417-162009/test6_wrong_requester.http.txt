@@ -1,0 +1,11 @@
+HTTP/1.1 403 Forbidden
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Allow,ETag,Last-Modified,Link,Location,Updates-Via,Www-Authenticate
+content-type: application/json
+content-length: 67
+Date: Fri, 17 Apr 2026 14:20:12 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"status":403,"description":"Forbidden","message":"Request denied"}

@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-ALICE_POLICY_CONTAINER="http://localhost:3000/alice/settings/policies/"
+UMA_POLICY_ENDPOINT="http://localhost:4000/uma/policies"
 DERIVED_RESOURCE="http://localhost:3000/alice/derived/acc-x/"
 ALICE_WEBID="http://localhost:3000/alice/profile/card#me"
 BOB_WEBID="http://localhost:3000/bob/profile/card#me"
@@ -22,7 +22,8 @@ echo ""
 # Check if servers are running
 echo "Checking server availability..."
 for i in {1..3}; do
-  if curl -s -f http://localhost:3000/ > /dev/null 2>&1 && curl -s -f http://localhost:4000/uma > /dev/null 2>&1; then
+  if curl -s -o /dev/null http://localhost:3000/ && \
+     curl -s -o /dev/null http://localhost:4000/uma/.well-known/uma2-configuration; then
     echo "✅ Servers are running"
     break
   fi
@@ -46,9 +47,9 @@ echo ""
 cat > /tmp/derived-acc-x-policy.ttl << 'POLICY'
 PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
 PREFIX ex: <http://example.org/>
-PREFIX dcterms: <http://purl.org/dc/terms/>
 
 ex:derivedAccXAgreement a odrl:Agreement ;
+    odrl:uid ex:derivedAccXAgreement ;
     odrl:permission ex:derivedAccXPermission .
 
 ex:derivedAccXPermission a odrl:Permission ;
@@ -63,11 +64,12 @@ echo "Policy assigner: $ALICE_WEBID"
 echo "Policy assignee: $BOB_WEBID"
 echo "Policy action: odrl:read"
 echo ""
-echo "Creating policy in: $ALICE_POLICY_CONTAINER"
+echo "Creating policy in: $UMA_POLICY_ENDPOINT"
 echo ""
 
 POLICY_RESPONSE=$(curl -s -i -X POST \
-  "$ALICE_POLICY_CONTAINER" \
+  "$UMA_POLICY_ENDPOINT" \
+  -H "Authorization: WebID http%3A%2F%2Flocalhost%3A3000%2Falice%2Fprofile%2Fcard%23me" \
   -H "Content-Type: text/turtle" \
   -d @/tmp/derived-acc-x-policy.ttl)
 
@@ -75,7 +77,7 @@ POLICY_STATUS=$(echo "$POLICY_RESPONSE" | head -1)
 echo "POLICY CREATION RESPONSE:"
 echo "$POLICY_STATUS"
 
-if ! echo "$POLICY_STATUS" | grep -q "201"; then
+if ! echo "$POLICY_STATUS" | grep -Eq "201|409"; then
   echo ""
   echo "❌ ERROR: Policy creation failed"
   echo "Full response:"
@@ -83,7 +85,21 @@ if ! echo "$POLICY_STATUS" | grep -q "201"; then
   exit 1
 fi
 
-echo "✅ Policy created successfully"
+if echo "$POLICY_STATUS" | grep -q "409"; then
+  echo "ℹ️ Policy already exists; continuing with existing policy state"
+else
+  echo "✅ Policy created successfully"
+fi
+echo ""
+sleep 1
+
+# Ensure there is at least one source observation so derived/latest resolves to content.
+echo "STEP 0.5: Seed one source observation in /alice/acc-x/"
+SEED_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  "http://localhost:3000/alice/acc-x/" \
+  -H "Content-Type: text/turtle" \
+  -d '<http://example.org/obs-live-test> <http://purl.org/dc/terms/issued> "2026-04-17T13:56:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .')
+echo "Seed POST status: $SEED_STATUS"
 echo ""
 sleep 1
 

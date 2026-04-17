@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const { spawnSync } = require('child_process');
 
 function nowMs() {
   return Number(process.hrtime.bigint()) / 1_000_000;
@@ -201,6 +202,33 @@ function isLocalUmaDemoResource(resourceUrl) {
 
 function normalizeAsIssuer(issuer) {
   return issuer.replace(/\/+$/, '');
+}
+
+function runStrictPreflight(config) {
+  const shouldRun = env('PANDA_UMA_STRICT_PREFLIGHT', 'true').toLowerCase() === 'true';
+  if (!shouldRun) return;
+
+  const preflightEnv = {
+    ...process.env,
+    PANDA_UMA_RESOURCE: config.resourceUrl,
+    PANDA_UMA_CLAIM_TOKEN: config.claimToken,
+    PANDA_UMA_REQUIRE_UMA_CHALLENGE: 'true',
+    PANDA_UMA_REQUIRE_401_CHALLENGE: 'true',
+    PANDA_UMA_REQUIRE_DENY_PATH: 'true',
+    PANDA_UMA_DENY_CLAIM_TOKEN: env('PANDA_UMA_DENY_CLAIM_TOKEN', 'http://localhost:3000/demo/profile/card#me'),
+    PANDA_UMA_WRONG_TARGET_RESOURCE: env('PANDA_UMA_WRONG_TARGET_RESOURCE', 'http://localhost:3000/alice/derived/acc-y/'),
+  };
+
+  const result = spawnSync('node', ['scripts/uma/smoke.js'], {
+    cwd: process.cwd(),
+    env: preflightEnv,
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`Strict UMA preflight failed: ${(result.stderr || result.stdout || '').trim()}`);
+  }
 }
 
 function inferOwnerWebId(resourceUrl) {
@@ -882,7 +910,7 @@ async function main() {
   const interIterationDelayMs = Number(env('INTER_ITERATION_DELAY_MS', '150'));
 
   const config = {
-    resourceUrl: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/ruben/private/derived/age'),
+    resourceUrl: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/'),
     resourceMethod: env('PANDA_UMA_RESOURCE_METHOD', 'GET'),
     requireUmaChallenge: env('PANDA_UMA_REQUIRE_UMA_CHALLENGE', 'true').toLowerCase() === 'true',
     tokenRequestMode: env('PANDA_UMA_TOKEN_REQUEST_MODE', 'uma').toLowerCase(),
@@ -924,6 +952,8 @@ async function main() {
   if (config.tokenRequestFilePath && !fs.existsSync(config.tokenRequestFilePath)) {
     throw new Error(`Token request file not found: ${config.tokenRequestFilePath}`);
   }
+
+  runStrictPreflight(config);
 
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   await fs.promises.mkdir(outputDir, { recursive: true });

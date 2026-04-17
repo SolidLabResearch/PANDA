@@ -1,0 +1,125 @@
+{
+  "matrix_id": "2026-04-17T14-28-57-547Z",
+  "generated_at": "2026-04-17T14:29:25.407Z",
+  "output_dir": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z",
+  "base_config": {
+    "resource": "http://localhost:3000/alice/derived/acc-x/",
+    "claimToken": "http://localhost:3000/alice/profile/card#me",
+    "authServer": "http://localhost:4000/uma",
+    "iterations": 1,
+    "warmupIterations": 0,
+    "interIterationDelayMs": 10,
+    "traceTimings": true
+  },
+  "scenarios": [
+    {
+      "id": "simple_localhost_warm",
+      "group": "simple-vs-complex",
+      "description": "Simple UMA ticket request, localhost, warm run.",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-simple_localhost_warm-2026-04-17T14-29-03-656Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1012.6773329973221,
+        "p95_total_flow_latency_ms": 1012.6773329973221,
+        "avg_initial_challenge_latency_ms": 509.13116693496704,
+        "avg_token_exchange_latency_ms": 491.2650419473648,
+        "avg_authorized_request_latency_ms": 11.17062497138977,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1011.463,
+        "avg_cpu_ms": 0.055
+      }
+    },
+    {
+      "id": "complex_localhost_warm",
+      "group": "simple-vs-complex",
+      "description": "Complex ODRL token request from JSON file, localhost, warm run.",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-complex_localhost_warm-2026-04-17T14-29-07-746Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1020.1096249818802,
+        "p95_total_flow_latency_ms": 1020.1096249818802,
+        "avg_initial_challenge_latency_ms": 515.3615410327911,
+        "avg_token_exchange_latency_ms": 494.6646250486374,
+        "avg_authorized_request_latency_ms": 8.876666069030762,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1018.799,
+        "avg_cpu_ms": 0.193
+      }
+    },
+    {
+      "id": "simple_localhost_cold",
+      "group": "cold-vs-warm",
+      "description": "Simple UMA request, cold run (no warmup iterations).",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-simple_localhost_cold-2026-04-17T14-29-11-881Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1031.441999912262,
+        "p95_total_flow_latency_ms": 1031.441999912262,
+        "avg_initial_challenge_latency_ms": 514.7700420618057,
+        "avg_token_exchange_latency_ms": 506.14450001716614,
+        "avg_authorized_request_latency_ms": 9.30650007724762,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1030.101,
+        "avg_cpu_ms": 0.058
+      }
+    },
+    {
+      "id": "simple_localhost_warm_compare",
+      "group": "cold-vs-warm",
+      "description": "Simple UMA request, warm run (configured warmup iterations).",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-simple_localhost_warm_compare-2026-04-17T14-29-16-004Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1031.6814169883728,
+        "p95_total_flow_latency_ms": 1031.6814169883728,
+        "avg_initial_challenge_latency_ms": 516.8151249885559,
+        "avg_token_exchange_latency_ms": 502.42287504673004,
+        "avg_authorized_request_latency_ms": 10.994750022888184,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1030.111,
+        "avg_cpu_ms": 0.062
+      }
+    },
+    {
+      "id": "simple_localhost_no_reuse",
+      "group": "reuse-vs-no-reuse",
+      "description": "Simple UMA request without token reuse.",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-simple_localhost_no_reuse-2026-04-17T14-29-20-225Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1029.4310410022736,
+        "p95_total_flow_latency_ms": 1029.4310410022736,
+        "avg_initial_challenge_latency_ms": 519.0062500238419,
+        "avg_token_exchange_latency_ms": 500.555624961853,
+        "avg_authorized_request_latency_ms": 8.819291949272156,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1028.273,
+        "avg_cpu_ms": 0.056
+      }
+    },
+    {
+      "id": "simple_localhost_reuse",
+      "group": "reuse-vs-no-reuse",
+      "description": "Simple UMA request with token reuse enabled.",
+      "status": "ok",
+      "summary_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmark-results/uma-latency-matrix-2026-04-17T14-28-57-547Z/uma-matrix-simple_localhost_reuse-2026-04-17T14-29-24-374Z.summary.json",
+      "metrics": {
+        "avg_total_flow_latency_ms": 1028.1219170093536,
+        "p95_total_flow_latency_ms": 1028.1219170093536,
+        "avg_initial_challenge_latency_ms": 519.0955410003662,
+        "avg_token_exchange_latency_ms": 498.50358295440674,
+        "avg_authorized_request_latency_ms": 9.437417030334473,
+        "avg_http_round_trips": 3,
+        "avg_network_ms": 1026.921,
+        "avg_cpu_ms": 0.062
+      }
+    },
+    {
+      "id": "simple_distributed_no_reuse",
+      "group": "localhost-vs-distributed",
+      "description": "Simple UMA request against distributed endpoints (no token reuse).",
+      "status": "skipped",
+      "reason": "Set PANDA_UMA_RESOURCE_DISTRIBUTED and PANDA_UMA_AUTH_SERVER_DISTRIBUTED."
+    }
+  ]
+}

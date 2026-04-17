@@ -1,0 +1,8 @@
+PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
+PREFIX ex: <http://example.org/>
+ex:p1 a odrl:Agreement ; odrl:uid ex:p1 ; odrl:permission ex:perm1 .
+ex:perm1 a odrl:Permission ;
+  odrl:target <http://localhost:3000/alice/derived/acc-x/> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:action odrl:read .

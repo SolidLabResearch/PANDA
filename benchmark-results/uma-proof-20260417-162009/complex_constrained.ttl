@@ -1,0 +1,14 @@
+PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
+PREFIX ex: <http://example.org/>
+ex:p3 a odrl:Agreement ; odrl:uid ex:p3 ; odrl:permission ex:perm3, ex:perm4 .
+ex:perm3 a odrl:Permission ;
+  odrl:target <http://localhost:3000/alice/derived/acc-x/> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:action odrl:read ;
+  odrl:constraint [ a odrl:Constraint ; odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:client:benchmark-complex> ] .
+ex:perm4 a odrl:Permission ;
+  odrl:target <http://localhost:3000/alice/derived/acc-y/> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> ;
+  odrl:assignee <http://localhost:3000/demo/profile/card#me> ;
+  odrl:action odrl:read .

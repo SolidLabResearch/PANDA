@@ -199,6 +199,29 @@ function runScenario(outputDir, scenario) {
   };
 }
 
+function runStrictPreflight(baseConfig) {
+  const envVars = {
+    ...process.env,
+    PANDA_UMA_RESOURCE: baseConfig.resource,
+    PANDA_UMA_CLAIM_TOKEN: baseConfig.claimToken,
+    PANDA_UMA_AUTH_SERVER: baseConfig.authServer,
+    PANDA_UMA_REQUIRE_UMA_CHALLENGE: 'true',
+    PANDA_UMA_REQUIRE_401_CHALLENGE: 'true',
+    PANDA_UMA_REQUIRE_DENY_PATH: 'true',
+    PANDA_UMA_DENY_CLAIM_TOKEN: env('PANDA_UMA_DENY_CLAIM_TOKEN', 'http://localhost:3000/demo/profile/card#me'),
+    PANDA_UMA_WRONG_TARGET_RESOURCE: env('PANDA_UMA_WRONG_TARGET_RESOURCE', 'http://localhost:3000/alice/derived/acc-y/'),
+  };
+  const proc = spawnSync('node', ['scripts/uma/smoke.js'], {
+    cwd: process.cwd(),
+    env: envVars,
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (proc.status !== 0) {
+    throw new Error(`Strict UMA preflight failed: ${(proc.stderr || proc.stdout || '').trim()}`);
+  }
+}
+
 function writeCsv(pathname, rows) {
   const header = [
     'id',
@@ -237,7 +260,7 @@ function writeCsv(pathname, rows) {
 
 function main() {
   const baseConfig = {
-    resource: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/ruben/private/derived/age'),
+    resource: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/'),
     claimToken: env('PANDA_UMA_CLAIM_TOKEN', 'http://localhost:3000/alice/profile/card#me'),
     authServer: env('PANDA_UMA_AUTH_SERVER', 'http://localhost:4000/uma'),
     iterations: Number(env('MATRIX_ITERATIONS', env('ITERATIONS', '20'))),
@@ -249,6 +272,8 @@ function main() {
   const matrixId = nowId();
   const outputDir = env('MATRIX_OUTPUT_DIR', path.join(process.cwd(), 'benchmark-results', `uma-latency-matrix-${matrixId}`));
   fs.mkdirSync(outputDir, { recursive: true });
+
+  runStrictPreflight(baseConfig);
 
   const scenarios = scenarioDefinitions(baseConfig);
   const results = scenarios.map((scenario) => runScenario(outputDir, scenario));
