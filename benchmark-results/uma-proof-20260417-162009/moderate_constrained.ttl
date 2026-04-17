@@ -1,9 +1,0 @@
-PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
-PREFIX ex: <http://example.org/>
-ex:p2 a odrl:Agreement ; odrl:uid ex:p2 ; odrl:permission ex:perm2 .
-ex:perm2 a odrl:Permission ;
-  odrl:target <http://localhost:3000/alice/derived/acc-x/> ;
-  odrl:assigner <http://localhost:3000/alice/profile/card#me> ;
-  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
-  odrl:action odrl:read ;
-  odrl:constraint [ a odrl:Constraint ; odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:client:benchmark> ] .

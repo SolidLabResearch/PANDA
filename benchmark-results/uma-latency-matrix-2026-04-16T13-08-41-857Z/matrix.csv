@@ -1,8 +1,0 @@
-id,group,status,avg_total_flow_latency_ms,p95_total_flow_latency_ms,avg_initial_challenge_latency_ms,avg_token_exchange_latency_ms,avg_authorized_request_latency_ms,avg_http_round_trips,avg_network_ms,avg_cpu_ms,summary_path,note
-simple_localhost_warm,simple-vs-complex,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-complex_localhost_warm,simple-vs-complex,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-simple_localhost_cold,cold-vs-warm,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-simple_localhost_warm_compare,cold-vs-warm,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-simple_localhost_no_reuse,reuse-vs-no-reuse,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-simple_localhost_reuse,reuse-vs-no-reuse,failed,,,,,,,,,,"[benchmark:uma-odrl] FAILED: Account login failed (403) for ruben@example.org."
-simple_distributed_no_reuse,localhost-vs-distributed,skipped,,,,,,,,,,"Set PANDA_UMA_RESOURCE_DISTRIBUTED and PANDA_UMA_AUTH_SERVER_DISTRIBUTED."

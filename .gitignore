@@ -115,3 +115,8 @@ scratch/
 .internal/
 .vscode/
 *.log
+
+# Generated benchmark/repro artifacts
+benchmark-results/**
+aggregator_resource_used-*.csv
+*.http.txt
