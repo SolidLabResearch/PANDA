@@ -1,158 +1,206 @@
-import { Logger } from "tslog";
-import { AuditLoggedQueryService } from "./AuditLoggedQueryService";
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { AuditLoggedQueryService } from './AuditLoggedQueryService';
+
+jest.mock('../aggregator/AggregatorInstantiator', () => ({
+    AggregatorInstantiator: jest.fn().mockImplementation(() => ({}))
+}));
 
 describe('AuditLoggedQueryService', () => {
-    let query_registry: AuditLoggedQueryService;
-    beforeAll(() => {
-        query_registry = new AuditLoggedQueryService();
-    })
-    const logger = new Logger();
-    const rspql_query = `
-    PREFIX saref: <https://saref.etsi.org/core/>
-    PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-    PREFIX : <https://rsp.js/>
-    REGISTER RStream <output> AS
-    SELECT (MAX(?o) as ?maxSKT)
-    FROM NAMED WINDOW :w1 ON STREAM <http://n061-14a.wall2.ilabt.iminds.be:3000/participant6/skt/> [RANGE 180000 STEP 30000]
-    WHERE {
-        WINDOW :w1 {
-            ?s saref:hasValue ?o .
-            ?s saref:relatesToProperty dahccsensors:wearable.skt .
-        }   
-    }
+    let queryRegistry: AuditLoggedQueryService;
+    let logPath: string;
+
+    const logger = {
+        info: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+        warn: jest.fn()
+    };
+
+    const baseQuery = `
+PREFIX saref: <https://saref.etsi.org/core/>
+PREFIX : <https://rsp.js/>
+REGISTER RStream <output> AS
+SELECT (AVG(?o) as ?avgSKT)
+FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/acc-x/> [RANGE 800 STEP 100]
+WHERE {
+  WINDOW :w1 {
+    ?s saref:hasValue ?o .
+  }
+}
 `;
 
-    it('initializing the AuditLoggedQueryService', () => {
-        expect(query_registry).toBeInstanceOf(AuditLoggedQueryService);
-    });
-    it(`adding a query to the registry`, async () => {
-        expect(await query_registry.add_query_in_registry(rspql_query, logger)).toBe(true);
-        query_registry.delete_all_queries_from_the_registry();
-    });
-
-    it('delete_all_queries_from_the_registry', async () => {
-        const query_one = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (MAX(?o) as ?maxSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14a.wall2.ilabt.iminds.be:3000/participant6/skt/> [RANGE 180000 STEP 30000]
-        WHERE {
-            WINDOW :w1 {
-                ?s saref:hasValue ?o .
-                ?s saref:relatesToProperty dahccsensors:wearable.skt .
-            }   
-        }
-        `;
-
-        const query_two = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (MIN(?o) as ?minSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14a.wall2.ilabt.iminds.be:3000/participant6/skt/> [RANGE 180000 STEP 30000]
-        WHERE {
-            WINDOW :w1 {
-                ?s saref:relatesToProperty ?o .
-            }   
-        }
-        `;
-        await query_registry.add_query_in_registry(query_one, logger);
-        await query_registry.add_query_in_registry(query_two, logger);
-        expect(query_registry.get_registered_queries().get_length()).toBe(2);
-        query_registry.delete_all_queries_from_the_registry();
-        expect(query_registry.get_registered_queries().get_length()).toBe(0);
+    beforeEach(() => {
+        queryRegistry = new AuditLoggedQueryService();
+        logPath = path.join(os.tmpdir(), `query_audit_test_${Date.now()}_${Math.random()}.json`);
+        (queryRegistry as any).logFilePath = logPath;
+        fs.writeFileSync(logPath, '[]');
+        jest.clearAllMocks();
     });
 
-    it('if_only_unique_queries_are_added_to_query_registry', async () => {
-        console.log(query_registry.get_executing_queries());
-        const query_one = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (AVG(?o) as ?avgSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14/skt/> [RANGE 800 STEP 100]
-        WHERE {
-            WINDOW :w1{
-                ?s saref:hasValue ?o
-            }
+    afterEach(() => {
+        if (fs.existsSync(logPath)) {
+            fs.unlinkSync(logPath);
         }
-        `;
-
-        const query_two = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (AVG(?o) as ?avgSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14/skt/> [RANGE 800 STEP 100]
-        WHERE {
-            WINDOW :w1{
-                ?s saref:hasValue ?o
-            }
-        }
-        `;
-
-        const query_three = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (AVG(?o) as ?avgSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14/skt/> [RANGE 800 STEP 100]
-        WHERE {
-            WINDOW :w1{
-                ?s ?p ?o
-            }
-        }
-        `;
-        // The first query is unique and should be added to the registry.
-        // The second query is not unique and should not be added to the registry.
-        expect(await query_registry.add_query_in_registry(query_one, logger)).toBe(true);
-        expect(await query_registry.add_query_in_registry(query_two, logger)).toBe(false);
-        // The third query is unique and should be added to the registry.
-        expect(await query_registry.add_query_in_registry(query_three, logger)).toBe(true);
-        query_registry.delete_all_queries_from_the_registry();
-        expect(query_registry.get_registered_queries().get_length()).toBe(0);
     });
 
-    it('get_registered_queries', async () => {
-        const query_one = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (AVG(?o) as ?avgSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14/skt/> [RANGE 800 STEP 100]
-        WHERE {
-            WINDOW :w1{
-                ?s saref:hasValue ?o
-            }
-        }
-        `;
+    it('registers a new query with audit metadata and executing status', async () => {
+        const result = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
 
-        await query_registry.add_query_in_registry(query_one, logger);
-        expect(query_registry.get_registered_queries().getArrayCopy().length).toBe(1);
+        expect(result.should_execute).toBe(true);
+        const entry = queryRegistry.get_query_log_by_id(result.query_id);
+        expect(entry).toBeDefined();
+        expect(entry?.registered_by).toBe('https://webid.org/nurse#me');
+        expect(entry?.status).toBe('executing');
+        expect(entry?.similar_queries_id).toEqual([]);
     });
 
-    it('check_unique_query', async () => {
-        const query_one = `
-        PREFIX saref: <https://saref.etsi.org/core/>
-        PREFIX dahccsensors: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
-        PREFIX : <https://rsp.js/>
-        REGISTER RStream <output> AS
-        SELECT (AVG(?o) as ?avgSKT)
-        FROM NAMED WINDOW :w1 ON STREAM <http://n061-14/skt/> [RANGE 800 STEP 100]
-        WHERE {
-            WINDOW :w1{
-                ?s saref:hasValue ?o
-            }
-        }
-        `;
-        await query_registry.add_query_in_registry(query_one, logger);
-        expect(query_registry.checkUniqueQuery(query_one, logger)).toBe(true);
+    it('records status transitions', async () => {
+        const result = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        const updated = queryRegistry.mark_query_status(result.query_id, 'executed');
+        expect(updated).toBe(true);
+        expect(queryRegistry.get_query_log_by_id(result.query_id)?.status).toBe('executed');
+    });
+
+    it('finds similar queries using normalized query text and keeps references', async () => {
+        const first = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        const normalizedVariant = `PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output> AS SELECT (AVG(?o) as ?avgSKT) FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/acc-x/> [RANGE 800 STEP 100] WHERE { WINDOW :w1 { ?s saref:hasValue ?o . } }`;
+
+        const second = await queryRegistry.register_query({
+            rspql_query: normalizedVariant,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/doctor#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        const secondEntry = queryRegistry.get_query_log_by_id(second.query_id);
+        expect(secondEntry?.similar_queries_id).toContain(first.query_id);
+        expect(secondEntry?.reuse_decision).toBe('not_reused_actor_scope_mismatch');
+        expect(second.should_execute).toBe(true);
+    });
+
+    it('prevents duplicate execution when same actor and scope submit same normalized query', async () => {
+        const first = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        queryRegistry.mark_query_status(first.query_id, 'executed');
+
+        const duplicate = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        expect(duplicate.should_execute).toBe(false);
+        const duplicateEntry = queryRegistry.get_query_log_by_id(duplicate.query_id);
+        expect(duplicateEntry?.reuse_decision).toBe('reused_existing');
+        expect(duplicateEntry?.reused_from_query_id).toBe(first.query_id);
+    });
+
+    it('logs data access events on query entries', async () => {
+        const registered = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        queryRegistry.logAccess(registered.query_id, {
+            user: 'https://webid.org/nurse#me',
+            timestamp: new Date().toISOString(),
+            data_accessed: 'http://localhost:3000/alice/acc-x/'
+        });
+
+        const entry = queryRegistry.get_query_log_by_id(registered.query_id);
+        expect(entry?.access_log.length).toBe(1);
+        expect(entry?.access_log[0].data_accessed).toBe('http://localhost:3000/alice/acc-x/');
+    });
+
+    it('does not reuse across actors even with same normalized query and same scope', async () => {
+        await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/nurse#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        const secondActor = await queryRegistry.register_query({
+            rspql_query: baseQuery,
+            rules: '',
+            from_timestamp: Date.now() - 1000,
+            to_timestamp: Date.now(),
+            logger,
+            query_type: 'historical+live',
+            event_emitter: {},
+            actor_webid: 'https://webid.org/researcher#me',
+            authorization_scope: ['http://localhost:3000/alice/acc-x/']
+        });
+
+        expect(secondActor.should_execute).toBe(true);
+        const entry = queryRegistry.get_query_log_by_id(secondActor.query_id);
+        expect(entry?.reuse_decision).toBe('not_reused_actor_scope_mismatch');
     });
 });

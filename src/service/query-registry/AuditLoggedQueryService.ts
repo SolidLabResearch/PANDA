@@ -1,4 +1,3 @@
-import { RSPQLParser } from "../parsers/RSPQLParser";
 import { Logger, ILogObj } from "tslog";
 import { AggregatorInstantiator } from "../aggregator/AggregatorInstantiator";
 import { is_equivalent } from "rspql-query-equivalence";
@@ -6,8 +5,52 @@ import { WriteLockArray } from "../../utils/query-registry/Util";
 import { hash_string_md5 } from "../../utils/Util";
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from "crypto";
 const websocketConnection = require('websocket').connection;
 const WebSocketClient = require('websocket').client;
+
+export type QueryStatus = 'registered' | 'executing' | 'executed' | 'failed';
+
+export interface AccessLogEntry {
+    user: string;
+    timestamp: string;
+    data_accessed: string;
+}
+
+export interface QueryLogEntry {
+    query_id: string;
+    query: string;
+    normalized_query: string;
+    registered_by: string;
+    timestamp: string;
+    status: QueryStatus;
+    similar_queries_id: string[];
+    reuse_decision: 'executed_new' | 'reused_existing' | 'not_reused_actor_scope_mismatch';
+    reused_from_query_id?: string;
+    authorization_scope: string[];
+    access_log: AccessLogEntry[];
+}
+
+export interface RegisterQueryInput {
+    rspql_query: string;
+    rules: string;
+    from_timestamp: number;
+    to_timestamp: number;
+    logger: any;
+    query_type: string;
+    event_emitter: any;
+    actor_webid: string;
+    authorization_scope: string[];
+}
+
+export interface RegisterQueryResult {
+    query_id: string;
+    query_hash: string;
+    should_execute: boolean;
+    reused_from_query_id?: string;
+    status: QueryStatus;
+}
+
 /**
  * The AuditLoggedQueryService class is responsible for registering, executing and storing the queries.
  * @class AuditLoggedQueryService
@@ -18,75 +61,211 @@ export class AuditLoggedQueryService {
     future_queries: string[];
     executing_queries: WriteLockArray<string>;
     query_count: number;
-    parser: RSPQLParser;
     logger: Logger<ILogObj>;
-    query_hash_map: Map<string, string>;
     static connection: typeof websocketConnection;
     public static client: any = new WebSocketClient();
-    private logFilePath = path.resolve(__dirname, '../../../../query_audit_log.json');
+    private readonly logFilePath = path.resolve(__dirname, '../../../../query_audit_log.json');
 
     /**
      * Creates an instance of AuditLoggedQueryService.
      * @memberof AuditLoggedQueryService
      */
     constructor() {
-        /**
-         * Map of registered queries which are the queries without any analysis by the AuditLoggedQueryService but only registered.  
-         */
         this.registered_queries = new WriteLockArray<string>();
-        /**
-         * Array of executing queries which were unique as compared to all the existing queries in the AuditLoggedQueryService. 
-         */
         this.executing_queries = new WriteLockArray<string>();
         this.executed_queries = new WriteLockArray<string>();
-        this.query_hash_map = new Map();
         this.future_queries = new Array<string>();
         this.query_count = 0;
-        this.parser = new RSPQLParser();
         this.logger = new Logger();
     }
-    /**
-     *  Register a query in the AuditLoggedQueryService.
-     * @param {string} rspql_query - The RSPQL query to be registered.
-     * @param {AuditLoggedQueryService} query_registry - The AuditLoggedQueryService object.
-     * @param {number} from_timestamp - The timestamp from where the query is to be executed.
-     * @param {number} to_timestamp - The timestamp to where the query is to be executed.
-     * @param {any} logger - The logger object.
-     * @param {string} query_type - The type of the query (either 'historical+live' or just 'live').
-     * @param {any} event_emitter - The event emitter object.
-     * @returns {Promise<boolean>} - Returns true if the query is unique, otherwise false.
-     * @memberof AuditLoggedQueryService
-     */
-    async register_query(rspql_query: string, rules: string, query_registry: AuditLoggedQueryService, from_timestamp: number, to_timestamp: number, logger: any, query_type: any, event_emitter: any): Promise<boolean> {
-        if (await query_registry.add_query_in_registry(rspql_query, logger)) {
-            /*
-            The query is not already executing or computed ; it is unique. So, just compute it and send it via the websocket.
-            */
-            logger.info({}, 'query_is_unique');
-            new AggregatorInstantiator(rspql_query, rules, from_timestamp, to_timestamp, logger, query_type, event_emitter);
 
-            const query_id = hash_string_md5(rspql_query + from_timestamp + to_timestamp);
-            const logEntry = {
-                query_id,
-                query: rspql_query,
-                registered_by: 'healthcare-worker',
-                timestamp: new Date().toISOString(),
-                similar_queries_id: [],
-                access_log: []
-            };
-            this.logQueryRegistration(logEntry);
-            this.auditQueryLog();
-            return true;
+    /**
+     * Normalize query text for deterministic similarity detection.
+     * Rules: trim leading/trailing whitespace and collapse internal whitespace to a single space.
+     */
+    public normalize_query(query: string): string {
+        return query.replace(/\s+/g, ' ').trim();
+    }
+
+    private normalize_scope(scope: string[]): string[] {
+        return Array.from(new Set(scope.map((s) => s.trim()).filter((s) => s.length > 0))).sort();
+    }
+
+    private sameScope(left: string[], right: string[]): boolean {
+        if (left.length !== right.length) {
+            return false;
         }
-        else {
-            /*
-            The query is already computed and stored in the Solid Stream Aggregator's Solid Pod. So, read from there and send via a websocket.
-            */
-            logger.info({}, 'query_is_not_unique');
-            this.logger.debug(`The query you have registered is already executing.`);
+        for (let i = 0; i < left.length; i++) {
+            if (left[i] !== right[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private read_logs(): QueryLogEntry[] {
+        if (!fs.existsSync(this.logFilePath)) {
+            return [];
+        }
+
+        try {
+            const data = fs.readFileSync(this.logFilePath, 'utf-8');
+            const parsed = JSON.parse(data);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_e) {
+            return [];
+        }
+    }
+
+    private write_logs(logs: QueryLogEntry[]): void {
+        fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
+    }
+
+    private update_log_entry(queryId: string, updater: (entry: QueryLogEntry) => QueryLogEntry): boolean {
+        const logs = this.read_logs();
+        const index = logs.findIndex((entry) => entry.query_id === queryId);
+        if (index === -1) {
             return false;
         }
 
+        logs[index] = updater(logs[index]);
+        this.write_logs(logs);
+        return true;
+    }
+
+    public get_query_log_by_id(queryId: string): QueryLogEntry | undefined {
+        const logs = this.read_logs();
+        return logs.find((entry) => entry.query_id === queryId);
+    }
+
+    public get_audit_log_entries(): QueryLogEntry[] {
+        return this.read_logs();
+    }
+
+    /**
+     * Register a query and decide if execution should happen now or can be safely reused.
+     */
+    public async register_query(input: RegisterQueryInput): Promise<RegisterQueryResult> {
+        const normalizedQuery = this.normalize_query(input.rspql_query);
+        const normalizedScope = this.normalize_scope(input.authorization_scope);
+        const existingLogs = this.read_logs();
+        const similarQueries = existingLogs.filter((entry) => {
+            if (entry.normalized_query) {
+                return entry.normalized_query === normalizedQuery;
+            }
+            return this.normalize_query(entry.query) === normalizedQuery;
+        });
+
+        const actorAndScopeMatch = similarQueries.find((entry) => {
+            const scope = this.normalize_scope(entry.authorization_scope || []);
+            return entry.registered_by === input.actor_webid && this.sameScope(scope, normalizedScope);
+        });
+
+        const query_id = randomUUID();
+        const query_hash = this.compute_query_hash(input.rspql_query);
+
+        const shouldReuse = actorAndScopeMatch !== undefined && (actorAndScopeMatch.status === 'executing' || actorAndScopeMatch.status === 'executed');
+        const reuse_decision = shouldReuse
+            ? 'reused_existing'
+            : (similarQueries.length > 0 ? 'not_reused_actor_scope_mismatch' : 'executed_new');
+
+        const status: QueryStatus = shouldReuse ? actorAndScopeMatch!.status : 'registered';
+
+        const logEntry: QueryLogEntry = {
+            query_id,
+            query: input.rspql_query,
+            normalized_query: normalizedQuery,
+            registered_by: input.actor_webid,
+            timestamp: new Date().toISOString(),
+            status,
+            similar_queries_id: similarQueries.map((entry) => entry.query_id),
+            reuse_decision,
+            reused_from_query_id: actorAndScopeMatch?.query_id,
+            authorization_scope: normalizedScope,
+            access_log: []
+        };
+
+        this.logQueryRegistration(logEntry);
+        await this.registered_queries.addItem(input.rspql_query);
+
+        if (shouldReuse) {
+            input.logger.info({ query_id, reused_from_query_id: actorAndScopeMatch!.query_id }, 'query_reused_existing_execution');
+            return {
+                query_id,
+                query_hash,
+                should_execute: false,
+                reused_from_query_id: actorAndScopeMatch!.query_id,
+                status: logEntry.status
+            };
+        }
+
+        this.mark_query_status(query_id, 'executing');
+        await this.add_to_executing_queries(input.rspql_query);
+
+        try {
+            new AggregatorInstantiator(
+                input.rspql_query,
+                input.rules,
+                input.from_timestamp,
+                input.to_timestamp,
+                input.logger,
+                input.query_type,
+                input.event_emitter,
+                {
+                    queryId: query_id,
+                    actorWebId: input.actor_webid,
+                    onDataAccess: (resource: string) => {
+                        this.logAccess(query_id, {
+                            user: input.actor_webid,
+                            timestamp: new Date().toISOString(),
+                            data_accessed: resource
+                        });
+                    },
+                    onExecutionFailed: (errorMessage: string) => {
+                        input.logger.error({ query_id, error: errorMessage }, 'query_execution_failed');
+                        this.mark_query_status(query_id, 'failed');
+                    }
+                }
+            );
+
+            input.logger.info({ query_id }, 'query_is_unique_and_executing');
+            return {
+                query_id,
+                query_hash,
+                should_execute: true,
+                status: 'executing'
+            };
+        } catch (error: any) {
+            this.mark_query_status(query_id, 'failed');
+            input.logger.error({ query_id, error: error?.message ?? String(error) }, 'query_execution_failed');
+            throw error;
+        }
+    }
+
+    public compute_query_hash(query: string): string {
+        return hash_string_md5(query);
+    }
+
+    /**
+     * Backward-compatible uniqueness check based on semantic equivalence against registered queries.
+     */
+    checkUniqueQuery(query: string, logger: any): boolean {
+        const registered_queries = this.get_registered_queries().getArrayCopy();
+        if (registered_queries.length <= 1) {
+            logger.info({}, 'isomorphic_check_done');
+            return false;
+        }
+
+        const candidates = registered_queries.slice(0, -1);
+        for (const registered_query of candidates) {
+            if (is_equivalent(query, registered_query)) {
+                logger.info({}, 'isomorphic_check_done');
+                return true;
+            }
+        }
+
+        logger.info({}, 'isomorphic_check_done');
+        return false;
     }
 
     /**
@@ -99,66 +278,44 @@ export class AuditLoggedQueryService {
     async add_query_in_registry(rspql_query: string, logger: any): Promise<boolean> {
         await this.registered_queries.addItem(rspql_query);
         if (this.checkUniqueQuery(rspql_query, logger)) {
-            /*
-            The query you have registered is already executing.
-            */
             return false;
         }
-        else {
-            /*
-            The query you have registered is not already executing.
-            */
-            this.add_to_executing_queries(rspql_query);
-            return true;
-        }
+        await this.add_to_executing_queries(rspql_query);
+        return true;
     }
 
     /**
      * Add a query to the executing queries.
-     * @param {string} query - The query to be added.
-     * @returns {Promise<void>} - Returns nothing.
-     * @memberof AuditLoggedQueryService
      */
     async add_to_executing_queries(query: string): Promise<void> {
-        this.executing_queries.addItem(query);
+        await this.executing_queries.addItem(query);
     }
 
-    /**
-     * Checking if the query is unique or if it is isomorphic with an already executing query.
-     * @param {string} query - The query to be checked.
-     * @param {any} logger - The logger object.
-     * @returns {boolean} - Returns true if the query is unique, otherwise false.
-     * @memberof AuditLoggedQueryService
-     */
-    checkUniqueQuery(query: string, logger: any): boolean {
-        const query_hashed = hash_string_md5(query);
-        const registered_queries = this.get_registered_queries();
-        const array_length = registered_queries.get_length();
-        if (array_length > 1) {
-            for (let i = 0; i < array_length; i++) {
-                return is_equivalent(query, registered_queries.get_item(i));
+    public mark_query_status(queryId: string, status: QueryStatus): boolean {
+        return this.update_log_entry(queryId, (entry) => ({ ...entry, status }));
+    }
+
+    public mark_query_status_by_hash(queryHash: string, status: QueryStatus): number {
+        const logs = this.read_logs();
+        let updatedCount = 0;
+
+        const nextLogs = logs.map((entry) => {
+            if (this.compute_query_hash(entry.query) === queryHash && entry.status !== 'failed') {
+                updatedCount++;
+                return { ...entry, status };
             }
-        }
-        if (array_length === 0) {
-            logger.info({ query_hashed }, 'array_length_is_zero');
-        }
-        logger.info({ query_hashed }, 'isomorphic_check_done')
-        return false;
-    }
+            return entry;
+        });
 
-    /**
-     * Get the query registry length.
-     * @returns {number} - The length of the query registry.
-     * @memberof AuditLoggedQueryService
-     */
-    get_query_registry_length() {
-        return this.registered_queries.get_length();
+        if (updatedCount > 0) {
+            this.write_logs(nextLogs);
+        }
+
+        return updatedCount;
     }
 
     /**
      * Delete all the queries from the registry.
-     * @returns {boolean} - Returns true if the queries are deleted, otherwise false.
-     * @memberof AuditLoggedQueryService
      */
     public delete_all_queries_from_the_registry() {
         this.registered_queries.delete_all_items();
@@ -167,78 +324,49 @@ export class AuditLoggedQueryService {
             this.logger.info('query_registry_cleared');
             return true;
         }
-        else {
-            this.logger.error('query_registry_not_cleared');
-            return false;
-        }
+        this.logger.error('query_registry_not_cleared');
+        return false;
     }
 
     /**
      * Log a query registration to the audit log file.
      */
     logQueryRegistration(entry: QueryLogEntry) {
-        let logs: QueryLogEntry[] = [];
-        if (fs.existsSync(this.logFilePath)) {
-            try {
-                const data = fs.readFileSync(this.logFilePath, 'utf-8');
-                logs = JSON.parse(data);
-            } catch (e) {
-                logs = [];
-            }
-        }
+        const logs = this.read_logs();
         logs.push(entry);
-        fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
+        this.write_logs(logs);
     }
 
     /**
      * Log an access event for a query to the audit log file.
      */
-    logAccess(queryId: string, access: { user: string; timestamp: string; data_accessed: string }) {
-        let logs: QueryLogEntry[] = [];
-        if (fs.existsSync(this.logFilePath)) {
-            try {
-                const data = fs.readFileSync(this.logFilePath, 'utf-8');
-                logs = JSON.parse(data);
-            } catch (e) {
-                logs = [];
-            }
-        }
-        const log = logs.find(q => q.query_id === queryId);
-        if (log) {
-            log.access_log.push(access);
-            fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
-        }
+    logAccess(queryId: string, access: AccessLogEntry) {
+        this.update_log_entry(queryId, (entry) => ({
+            ...entry,
+            access_log: [...entry.access_log, access]
+        }));
     }
 
     public auditQueryLog() {
-        // You can call logQueryRegistration or logAccess here as needed
+        // Intentionally left as a placeholder for future periodic audit actions.
     }
 
     /**
      * Get the executing queries.
-     * @returns {WriteLockArray<string>} - The executing queries.
-     * @memberof AuditLoggedQueryService
      */
     get_executing_queries() {
         return this.executing_queries;
     }
 
-
-    /** 
+    /**
      * Get the registered queries.
-     * @returns {WriteLockArray<string>} - The registered queries.
-     * @memberof AuditLoggedQueryService
      */
     get_registered_queries() {
         return this.registered_queries;
     }
 
-
     /**
      * Send a message to the server.
-     * @static
-     * @param {string} message - The message to be sent.
-     * @memberof AuditLoggedQueryService
      */
     static send_to_server(message: string) {
         if (this.connection.connected) {
@@ -253,9 +381,6 @@ export class AuditLoggedQueryService {
 
     /**
      * Connect with the Websocket server.
-     * @static
-     * @param {string} websocketURL - The URL of the websocket server.
-     * @memberof AuditLoggedQueryService
      */
     static async connect_with_server(websocketURL: string) {
         this.client.connect(websocketURL, 'solid-stream-aggregator-protocol');
@@ -267,18 +392,4 @@ export class AuditLoggedQueryService {
             console.log('Connect Error: ' + error.toString());
         });
     }
-
-}
-
-interface QueryLogEntry {
-  query_id: string;
-  query: string;
-  registered_by: string;
-  timestamp: string;
-  similar_queries_id: string[];
-  access_log: Array<{
-    user: string;
-    timestamp: string;
-    data_accessed: string;
-  }>;
 }

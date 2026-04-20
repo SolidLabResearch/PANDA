@@ -18,6 +18,7 @@ export class NotificationStreamProcessor {
     public logger: any;
     public stream_name: RDFStream | undefined;
     public event_emitter: any;
+    private readonly auditContext?: QueryExecutionAuditContext;
 
     /**
      * Creates an instance of NotificationStreamProcessor.
@@ -27,12 +28,13 @@ export class NotificationStreamProcessor {
      * @param {*} event_emitter - The event emitter object.
      * @memberof NotificationStreamProcessor
      */
-    constructor(ldes_stream: string, logger: any, rsp_engine: RSPEngine, event_emitter: any) {
+    constructor(ldes_stream: string, logger: any, rsp_engine: RSPEngine, event_emitter: any, auditContext?: QueryExecutionAuditContext) {
         this.ldes_stream = ldes_stream;
         this.logger = logger;
         this.rsp_engine = rsp_engine;
         this.stream_name = rsp_engine.getStream(ldes_stream);
         this.event_emitter = event_emitter;
+        this.auditContext = auditContext;
         this.fetchAuthorizedTokenAndInitialize();
         this.logger.info({}, 'notification_stream_processor_started');
     }
@@ -76,6 +78,7 @@ export class NotificationStreamProcessor {
                 } catch (error) {
                     this.logger.warn({}, `subscription_to_ldes_stream_failed_with_error`);
                     console.warn(`Subscription setup failed for ${this.ldes_stream}. Continuing with direct webhook handling.`, error);
+                    this.auditContext?.onExecutionFailed?.((error as Error).message);
                 }
             }
             else {
@@ -109,6 +112,7 @@ export class NotificationStreamProcessor {
          */
         const timestamp_predicate = "https://saref.etsi.org/core/hasTimestamp";
         event_emitter.on(`${this.ldes_stream}`, async (latest_event: string) => {
+            this.auditContext?.onDataAccess?.(this.ldes_stream);
             this.logger.info({}, 'latest_event_received_preprocessing_started');
             /** 
              * The latest event is a string in Turtle format.
@@ -165,4 +169,11 @@ export class NotificationStreamProcessor {
             }
         });
     }
+}
+
+type QueryExecutionAuditContext = {
+    queryId: string;
+    actorWebId: string;
+    onDataAccess?: (resource: string) => void;
+    onExecutionFailed?: (errorMessage: string) => void;
 }

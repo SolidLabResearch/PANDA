@@ -22,6 +22,14 @@ export class GETHandler {
             if (req.url === '/clearAuditLoggedQueryService') {
                 query_registry.delete_all_queries_from_the_registry();
                 res.write('Query registry cleared');
+                return;
+            }
+
+            if (req.url === '/queryAuditLog') {
+                const logs = query_registry.get_audit_log_entries();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.write(JSON.stringify(logs, null, 2));
+                return;
             }
         }
         else {

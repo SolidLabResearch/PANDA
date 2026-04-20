@@ -44,6 +44,7 @@ export class HTTPServer {
         this.aggregation_publisher = new LDESPublisher();
         this.event_emitter = new EventEmitter();
         this.websocket_handler = new WebSocketHandler(this.websocket_server, this.event_emitter, this.aggregation_publisher, this.logger);
+        this.query_registry = this.websocket_handler.get_query_registry();
         this.websocket_handler.handle_wss();
         // Commenting out the aggregation event publisher as we are not storing the resultant LDES stream in a Solid Pod.
         // this.websocket_handler.aggregation_event_publisher();

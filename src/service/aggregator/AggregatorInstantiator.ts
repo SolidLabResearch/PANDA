@@ -30,6 +30,7 @@ export class AggregatorInstantiator {
     public to_date: Date;
     public client = new WebSocketClient();
     public connection: typeof websocketConnection;
+    private readonly auditContext?: QueryExecutionAuditContext;
     /**
      * Creates an instance of AggregatorInstantiator.
      * @param {string} query - The RSPQL query.
@@ -41,11 +42,12 @@ export class AggregatorInstantiator {
      * @param {any} event_emitter - The event emitter object.
      * @memberof AggregatorInstantiator
      */
-    public constructor(query: string, rules: string, from_timestamp: number, to_timestamp: number, logger: any, query_type: string, event_emitter: any) {
+    public constructor(query: string, rules: string, from_timestamp: number, to_timestamp: number, logger: any, query_type: string, event_emitter: any, auditContext?: QueryExecutionAuditContext) {
         this.query = query;
         this.rules = rules;
         this.logger = logger;
         this.event_emitter = event_emitter;
+        this.auditContext = auditContext;
         this.hash_string = hash_string_md5(query);
         this.rsp_engine = new RSPEngine(query);
         this.from_date = new Date(from_timestamp);
@@ -73,7 +75,7 @@ export class AggregatorInstantiator {
                 for (const stream of this.stream_array) {
                     const session_credentials = this.get_session_credentials(stream);
                     this.logger.info({ query_hashed }, `stream_credentials_retrieved`);
-                    new DecentralizedFileStreamer(stream, session_credentials, this.from_date, this.to_date, this.rsp_engine, this.query, this.logger);
+                    new DecentralizedFileStreamer(stream, session_credentials, this.from_date, this.to_date, this.rsp_engine, this.query, this.logger, this.auditContext);
                 }
                 this.subscribeRStream();
                 return true;
@@ -82,7 +84,7 @@ export class AggregatorInstantiator {
                 console.log(`The query type is live.`);
                 for (const stream of this.stream_array) {
                     this.logger.info({ query_hashed }, `stream_credentials_retrieved`);
-                    new NotificationStreamProcessor(stream, this.logger, this.rsp_engine, this.event_emitter);
+                    new NotificationStreamProcessor(stream, this.logger, this.rsp_engine, this.event_emitter, this.auditContext);
                 }
                 this.subscribeRStream();
                 return true;
@@ -258,6 +260,7 @@ export class AggregatorInstantiator {
         this.client.connect(wssURL, 'solid-stream-aggregator-protocol');
         this.client.on('connectFailed', (error: Error) => {
             console.log('Connect Error: ' + error.toString());
+            this.auditContext?.onExecutionFailed?.(error.message);
         });
         this.client.setMaxListeners(Infinity);
         this.client.on('connect', (connection: typeof websocketConnection) => {
@@ -291,4 +294,11 @@ export class AggregatorInstantiator {
         return session_credentials;
     }
 
+}
+
+type QueryExecutionAuditContext = {
+    queryId: string;
+    actorWebId: string;
+    onDataAccess?: (resource: string) => void;
+    onExecutionFailed?: (errorMessage: string) => void;
 }

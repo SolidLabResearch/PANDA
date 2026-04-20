@@ -39,6 +39,7 @@ export class DecentralizedFileStreamer {
     public logger: any
     public notification_listening_time: number = 0;
     public missing_event_queue: StreamEventQueue<Set<Quad>>;
+    private readonly auditContext?: QueryExecutionAuditContext;
     /**
      * Creates an instance of DecentralizedFileStreamer.
      * @param {string} ldes_stream - The LDES stream URL.
@@ -50,13 +51,14 @@ export class DecentralizedFileStreamer {
      * @param {*} logger - The logger object.
      * @memberof DecentralizedFileStreamer
      */
-    constructor(ldes_stream: string, session_credentials: session_credentials, from_date: Date, to_date: Date, rsp_engine: RSPEngine, query: string, logger: any) {
+    constructor(ldes_stream: string, session_credentials: session_credentials, from_date: Date, to_date: Date, rsp_engine: RSPEngine, query: string, logger: any, auditContext?: QueryExecutionAuditContext) {
         this.ldes_stream = ldes_stream;
         this.communication = this.get_communication(session_credentials);
         this.from_date = from_date;
         this.to_date = to_date;
         this.query = query;
         this.logger = logger;
+        this.auditContext = auditContext;
         this.query_hash = hash_string_md5(query);
         this.missing_event_queue = new StreamEventQueue<Set<Quad>>([]);
         this.stream_name = rsp_engine.getStream(this.ldes_stream);
@@ -131,6 +133,7 @@ export class DecentralizedFileStreamer {
      * @memberof DecentralizedFileStreamer
      */
     public async initiateDecentralizedFileStreamer(): Promise<void> {
+        this.auditContext?.onDataAccess?.(this.ldes_stream);
         const communication = await this.communication;
         this.ldes = new LDESinLDP(this.ldes_stream, communication);
         const metadata = await this.ldes.readMetadata();
@@ -168,6 +171,7 @@ export class DecentralizedFileStreamer {
 
         stream.on("error", async (error: Error) => {
             console.log(`The reading from the solid pod ldes stream has an error: ${error}`);
+            this.auditContext?.onExecutionFailed?.(error.message);
         });
     }
 
@@ -459,4 +463,11 @@ type session_credentials = {
     id: string;
     secret: string;
     idp: string;
+}
+
+type QueryExecutionAuditContext = {
+    queryId: string;
+    actorWebId: string;
+    onDataAccess?: (resource: string) => void;
+    onExecutionFailed?: (errorMessage: string) => void;
 }
