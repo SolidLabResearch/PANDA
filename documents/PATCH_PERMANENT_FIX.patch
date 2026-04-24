@@ -1,0 +1,69 @@
+--- a/PANDA/src/server/WebSocketHandler.ts
++++ b/PANDA/src/server/WebSocketHandler.ts
+@@ -1,6 +1,8 @@
+ import { logger } from '../utils/logger';
+ import { DerivedResourcesComponentQueryHandler } from '../service/queryHandler/DerivedResourcesComponentQueryHandler';
+ import { NotificationStreamProcessor } from '../service/aggregator/NotificationStreamProcessor';
++import { postPolicy } from '../uma/access';
++import { randomUUID } from 'crypto';
+ 
+ export class WebSocketHandler {
+     // ...existing code...
+@@ -356,11 +358,48 @@ export class WebSocketHandler {
+     private async authorizeDerivedResource(containers_to_publish: string[]): Promise<void> {
+         const derivedResources = containers_to_publish.map(url => {
+             const parts = url.split('/');
+             const lastSegment = parts[parts.length - 2];
+             parts.splice(parts.length - 1, 1);
+             parts.push('derived', lastSegment);
+             return parts.join('/');
+         });
+ 
+         for (const container of derivedResources) {
++            // Extract owner WebID from derived resource URL
++            // Format: http://localhost:3000/alice/derived/acc-x/ -> http://localhost:3000/alice/
++            const ownerUrl = container.split('/').slice(0, 4).join('/') + '/';
++            const ownerWebId = ownerUrl + 'profile/card#me';
++            
++            // Create ODRL policy for the derived resource
++            try {
++                const policy = this.createDerivedResourcePolicy(container, ownerWebId);
++                const policyContainer = `${ownerUrl}settings/policies/`;
++                
++                await postPolicy(policy, policyContainer);
++                logger.info(`[Derived Resource] Created ODRL policy for ${container}`);
++            } catch (err) {
++                logger.warn(
++                    `[Derived Resource] Failed to create policy for ${container}: ${
++                        err instanceof Error ? err.message : err
++                    }`
++                );
++                // Continue even if policy creation fails - pre-authorization will still be attempted
++            }
++            
+             await this.preAuthorize(container, 'GET');
+         }
+     }
++
++    /**
++     * Creates an ODRL Agreement + Permission policy for a derived resource.
++     * The policy allows the resource owner (assigner) to permit read access.
++     */
++    private createDerivedResourcePolicy(derivedResource: string, ownerWebId: string): string {
++        const now = new Date().toISOString();
++        return `PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
++PREFIX ex: <http://example.org/>
++PREFIX dcterms: <http://purl.org/dc/terms/>
++
++ex:derivedResourceAgreement a odrl:Agreement ;
++    odrl:uid <urn:ucp:policy:${randomUUID()}> ;
++    dcterms:created "${now}"^^<http://www.w3.org/2001/XMLSchema#dateTime> ;
++    dcterms:description "ODRL policy for derived resource" ;
++    odrl:permission ex:derivedResourcePermission .
++
++ex:derivedResourcePermission a odrl:Permission ;
++    odrl:target <${derivedResource}> ;
++    odrl:assigner <${ownerWebId}> ;
++    odrl:action odrl:read .`;
++    }
+ }

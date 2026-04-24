@@ -3,18 +3,17 @@ const parser: RSPQLParser = new RSPQLParser();
 import * as AGG_CONFIG from '../../config/aggregator_config.json';
 import { RateLimitedLDPCommunication } from "rate-limited-ldp-communication";
 import { filterRelation, ILDESinLDPMetadata, LDESinLDP, MetadataParser } from "@treecg/versionawareldesinldp";
-const ld_fetch = require('ldfetch');
-const ldfetch = new ld_fetch({});
+import { RdfHttpClient } from "../../utils/RdfHttpClient";
 import { extractDateFromLiteral } from "@treecg/versionawareldesinldp";
 import { Member } from "@treecg/types";
 import { Readable } from "stream";
-import { Quad } from "rdflib/lib/tf-types";
 import { hash_string_md5 } from "../../utils/Util";
 import { TREE } from "@treecg/ldes-snapshot";
 import { DataFactory, Store } from "n3";
 import { aggregationDispatcherType } from "../../utils/Types";
-import { Literal } from "n3";
+import { Literal, Quad } from "n3";
 const { namedNode } = DataFactory;
+const rdfFetch = new RdfHttpClient();
 
 /**
  * Class for dispatching aggregated events.
@@ -124,7 +123,7 @@ export class AggregationDispatcher {
         const fno_description = new Map<string, Quad[]>()
         for (const fragment of fragment_containers) {
             const fno_metadata = fragment + '.meta'
-            const response = await ldfetch.get(fno_metadata);
+            const response = await rdfFetch.get(fno_metadata);
             fno_description.set(fragment, response.triples);
         }
 

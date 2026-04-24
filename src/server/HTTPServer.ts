@@ -5,8 +5,9 @@ import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQu
 import { WebSocketHandler } from "./WebSocketHandler";
 import * as websocket from 'websocket';
 const EventEmitter = require('events');
-import { TokenManagerService } from "../service/authorization/TokenManagerService";
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
+import { getUmaClaim } from "../config/UmaClaim";
+import { resolveNotificationTopic } from "./NotificationTopicResolver";
 
 /**
  * Class for the HTTP Server.
@@ -33,10 +34,7 @@ export class HTTPServer {
     constructor(http_port: number, solid_server_url: string, logger: any) {
         this.solid_server_url = solid_server_url;
         this.dynamic_endpoints = {};
-        this.uma_fetcher = new ReuseTokenUMAFetcher({
-            token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
-            token_format: "urn:solidlab:uma:claims:formats:webid"
-        });
+        this.uma_fetcher = new ReuseTokenUMAFetcher(getUmaClaim());
         this.http_server = createServer(this.request_handler.bind(this)).listen(http_port);
         this.logger = logger;
         this.websocket_server = new websocket.server({
@@ -46,6 +44,7 @@ export class HTTPServer {
         this.aggregation_publisher = new LDESPublisher();
         this.event_emitter = new EventEmitter();
         this.websocket_handler = new WebSocketHandler(this.websocket_server, this.event_emitter, this.aggregation_publisher, this.logger);
+        this.query_registry = this.websocket_handler.get_query_registry();
         this.websocket_handler.handle_wss();
         // Commenting out the aggregation event publisher as we are not storing the resultant LDES stream in a Solid Pod.
         // this.websocket_handler.aggregation_event_publisher();
@@ -82,61 +81,30 @@ export class HTTPServer {
 
                     if (webhook_notification_data.type === 'Add') {
                         this.logger.info({}, 'webhook_notification_received');
-                        // the target is where a new notification is added into the ldes stream.
-                        // LDES stream can be found by stripping the inbox from the target with the slash semantics as described in the Solid Protocol.
-                        // Link : https://solidproject.org/TR/protocol#uri-slash-semantics
-                        const location_where_event_is_added = webhook_notification_data.target;
-                        const ldes_stream_where_event_is_added = location_where_event_is_added.replace(/\/\d+\/$/, '/');
+                        const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
+                        const objectTarget = typeof webhook_notification_data.object === 'string' ? webhook_notification_data.object : undefined;
+                        const fetchTarget = objectTarget ?? target;
+                        const topic = resolveNotificationTopic(webhook_notification_data, fetchTarget ?? target);
 
-                        const derived_target = this.toDerivedTarget(location_where_event_is_added);
-                        console.log(`Derived Target is: `, derived_target);
+                        if (!fetchTarget || !topic) {
+                            this.logger.error({}, 'webhook_notification_missing_target_or_topic');
+                            return;
+                        }
 
-                        const token = TokenManagerService.getInstance().getAccessToken(derived_target);
-                        if (token) {
-                            if (token.token_type && token.access_token) {
-                                console.log(token);
-                                console.log(token.token_type);
-                                console.log(token.access_token);
-                                console.log(`Authorization: ${token.token_type} ${token.access_token}`);
-                                
-                                const latest_event_response = await fetch(derived_target, {
-
-                                    method: 'GET',
-                                    headers: {
-                                        'Authorization': `${token.token_type} ${token.access_token}`,
-                                        'Accept': 'text/turtle'
-                                    }
-                                });
-                                if (latest_event_response.status === 200 || latest_event_response.status === 201 || latest_event_response.status === 203 || latest_event_response.status === 204) {
-                                    const latest_event = await latest_event_response.text();
-                                    console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} with token ${token.access_token}, ${token.token_type}`);
-                                    this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                                    this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                                }
-                                else {
-                                    const new_token_response = await this.uma_fetcher.fetch(derived_target, {
-                                        method: 'GET',
-                                        headers: {
-                                            'Accept': 'text/turtle'
-                                        }
-                                    });
-
-                                    if (new_token_response.ok) {
-                                        const latest_event = await new_token_response.text();
-                                        console.log(`The latest event is ${latest_event} from GET of the resource ${derived_target} after fetching new token`);
-                                        this.event_emitter.emit(`${ldes_stream_where_event_is_added}`, latest_event);
-                                        this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                                    } else {
-                                        console.error(`Failed to fetch resource even after getting new token. Status: ${new_token_response.status}`);
-                                    }
-                                }
+                        const latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'text/turtle'
                             }
-                            else {
-                                console.log(TokenManagerService.getInstance().getAllTokens());
+                        });
 
-                                console.log('Cannot access the derived resource as the token does not exist.');
-                            }
-
+                        if (latest_event_response.ok) {
+                            const latest_event = await latest_event_response.text();
+                            this.logger.info({ topic, fetch_target: fetchTarget }, 'webhook_notification_emitting_topic');
+                            this.event_emitter.emit(topic, latest_event);
+                            this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                        } else {
+                            console.error(`Failed to fetch notified resource ${target}. Status: ${latest_event_response.status}`);
                         }
                     }
                 });
@@ -166,15 +134,4 @@ export class HTTPServer {
         this.logger.info({}, 'http_server_closed');
     }
 
-    public toDerivedTarget(originalUrl: string): string {
-        const url = new URL(originalUrl);
-        const parts = url.pathname.split('/').filter(Boolean); // removes empty segments
-
-        const basePath = parts.slice(0, -1).join('/');  // e.g., "alice"
-        const lastSegment = parts[parts.length - 1];    // e.g., "acc-x"
-
-        // Construct new path: /alice/derived/acc-x
-        url.pathname = `/${basePath}/derived/${lastSegment}`;
-        return url.toString();
-    }
 }

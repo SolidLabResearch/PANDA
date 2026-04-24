@@ -41,11 +41,29 @@ export function parseAuthenticateHeader(headers: Headers): UMA_Session {
     const wwwAuthenticateHeader = headers.get("WWW-Authenticate")
     if (!wwwAuthenticateHeader) throw Error("No WWW-Authenticate Header present");
 
-    const { as_uri, ticket } = Object.fromEntries(wwwAuthenticateHeader.replace(/^UMA /, '').split(', ').map(
-        param => param.split('=').map(s => s.replace(/"/g, ''))
-    ));
+    const headerWithoutScheme = wwwAuthenticateHeader.replace(/^UMA\s+/i, "");
+    const params = Object.fromEntries(
+        headerWithoutScheme
+            .split(/\s*,\s*/)
+            .map((param) => {
+                const separatorIndex = param.indexOf("=");
+                if (separatorIndex < 0) {
+                    return [param.trim(), ""];
+                }
+                const key = param.slice(0, separatorIndex).trim();
+                const value = param.slice(separatorIndex + 1).trim().replace(/^"|"$/g, "");
+                return [key, value];
+            })
+    );
 
-    const tokenEndpoint = as_uri + "/token" // NOTE: should normally be retrieved from .well-known/uma2-configuration
+    const as_uri = params.as_uri;
+    const ticket = params.ticket;
+
+    if (!as_uri || !ticket) {
+        throw Error(`Invalid UMA WWW-Authenticate header: ${wwwAuthenticateHeader}`);
+    }
+
+    const tokenEndpoint = new URL("token", as_uri.endsWith("/") ? as_uri : `${as_uri}/`).toString();
 
     return {
         tokenEndpoint,
@@ -94,7 +112,7 @@ export class UserManagedAccessFetcher {
         const content = {
             grant_type: this.grant_type,
             ticket,
-            claim_token: encodeURIComponent(this.claim.token),
+            claim_token: this.claim.token,
             claim_token_format: this.claim.token_format,
         }
 

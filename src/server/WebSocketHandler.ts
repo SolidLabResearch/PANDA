@@ -14,6 +14,7 @@ import * as AGG_CONFIG from '../config/pod_credentials.json';
 import * as dotenv from 'dotenv';
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 import { ContinuousAnomalyMonitoringService } from "../service/reasoner/ContinuousAnomalyMonitoringService";
+import { getUmaClaim } from "../config/UmaClaim";
 dotenv.config();
 
 /**
@@ -48,10 +49,7 @@ export class WebSocketHandler {
         this.websocket_server = websocket_server;
         this.event_emitter = event_emitter;
         this.token_manager = TokenManagerService.getInstance();
-        this.uma_fetcher = new ReuseTokenUMAFetcher({
-            token: "http://n063-04b.wall2.ilabt.iminds.be/replayer#me",
-            token_format: "urn:solidlab:uma:claims:formats:webid"
-        });
+        this.uma_fetcher = new ReuseTokenUMAFetcher(getUmaClaim());
         this.aggregation_publisher = aggregation_publisher;
         this.connections = new Map<string, WebSocket[]>();
         this.parser = new RSPQLParser();
@@ -84,6 +82,7 @@ export class WebSocketHandler {
                     if (Object.keys(ws_message).includes('query') && Object.keys(ws_message).includes('rules')) {
                         this.logger.info({ query: ws_message.query }, `new_query_received_from_client_ws`);
                         this.logger.info({ rules: ws_message.rules }, `rule_received_from_client_ws`);
+                        const actor_webid = ws_message.actor_webid || ws_message.actor || ws_message.webid || 'unknown-actor';
                         const query_type = ws_message.type;
                         if (query_type === 'historical+live' || query_type === 'live') {
                             this.logger.info({}, `query_preprocessing_started`);
@@ -95,7 +94,7 @@ export class WebSocketHandler {
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
                             await this.authorizeDerivedResource(streams);
-                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger);
+                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger, actor_webid, streams);
                         }
                         else {
                             throw new Error(`The type of Query is not supported/handled. The type of query is: ${ws_message.type}`);
@@ -114,6 +113,12 @@ export class WebSocketHandler {
                     }
                     else if (Object.keys(ws_message).includes('status')) {
                         const query_hash = ws_message.query_hash;
+                        if (ws_message.status === 'stream_reader_ended') {
+                            this.query_registry.mark_query_status_by_hash(query_hash, 'executed');
+                        }
+                        if (ws_message.status === 'failed') {
+                            this.query_registry.mark_query_status_by_hash(query_hash, 'failed');
+                        }
                         for (const [query, connections] of this.connections) {
                             if (query === query_hash) {
                                 for (const connection of connections) {
@@ -146,6 +151,7 @@ export class WebSocketHandler {
         this.event_emitter.on('aggregation_event', (object: string) => {
             const event = JSON.parse(object)
             const query_id = event.query_hash;
+            this.query_registry.mark_query_status_by_hash(query_id, 'executed');
             const connections = this.connections.get(query_id);
             if (connections !== undefined) {
                 for (const connection of connections) {
@@ -256,8 +262,12 @@ export class WebSocketHandler {
      * @param {EventEmitter} event_emitter - The event emitter object.
      * @memberof WebSocketHandler
      */
-    public process_query(query: string, rules: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any) {
-        QueryHandler.handle_ws_query(query, rules, width, this.query_registry, this.logger, this.connections, query_type, event_emitter);
+    public process_query(query: string, rules: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any, actor_webid: string, authorization_scope: string[]) {
+        QueryHandler.handle_ws_query(query, rules, width, this.query_registry, this.logger, this.connections, query_type, event_emitter, actor_webid, authorization_scope);
+    }
+
+    public get_query_registry(): AuditLoggedQueryService {
+        return this.query_registry;
     }
 
     /**
@@ -363,13 +373,23 @@ export class WebSocketHandler {
             parts.push('derived', lastSegment!);
             return parts.join('/');
         });
-    
+
         console.log(derivedResources);
         console.log(containers_to_publish);
-    
+
         await Promise.all(
-            derivedResources.map(container => {
-                return this.preAuthorize(container, 'GET');
+            derivedResources.map(async (container, index) => {
+                try {
+                    await this.preAuthorize(container, 'GET');
+                } catch (error) {
+                    const fallback = containers_to_publish[index];
+                    console.warn(`[UMA] Derived pre-authorization failed for ${container}. Falling back to stream ${fallback}.`, error);
+                    try {
+                        await this.preAuthorize(fallback, 'GET');
+                    } catch (fallbackError) {
+                        console.warn(`[UMA] Fallback pre-authorization failed for ${fallback}. Continuing without pre-authorization.`, fallbackError);
+                    }
+                }
             })
         );
     }

@@ -1,82 +1,101 @@
 import axios from 'axios';
 import { SubscriptionServerNotification } from '../Types';
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json';
+import { TokenManagerService } from '../../service/authorization/TokenManagerService';
+
 const N3 = require('n3');
 const parser = new N3.Parser();
-import { TokenManagerService } from '../../service/authorization/TokenManagerService';
 const token_manager = TokenManagerService.getInstance();
+
 /**
  * Extracts the subscription server from the given resource.
  * @param {string} resource - The resource which you want to read the notifications from.
  * @returns {Promise<SubscriptionServerNotification | undefined>} - A promise which returns the subscription server or if not returns undefined.
  */
 export async function extract_subscription_server(resource: string): Promise<SubscriptionServerNotification | undefined> {
-    /**
-    * Hardcoding now. 
-    * Note to self that for notification protocol you need to have authorization to read the subscription server.
-    */
-    const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
-    const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-    const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-
-    const subscription_response: SubscriptionServerNotification = {
-        location: subscription_server,
-        channelType: subscription_type,
-        channelLocation: channelLocation
-    }
-    return subscription_response;
-
     const store = new N3.Store();
     try {
-
         const token = token_manager.getAccessToken(resource);
-        if (token) {
-            const token_type = token?.token_type;
-            const access_token = token?.access_token;
-            const response = await axios.head(resource, {
-                headers: {
-                    'Authorization': `${token_type} ${access_token}` // Add the access token to the headers.
-                }
-            });
-            const link_header = response.headers['link'];
-            if (link_header) {
-                const link_header_parts = link_header.split(',');
-                for (const part of link_header_parts) {
-                    const [link, rel] = part.split(';').map((item: string) => item.trim());
-                    if (rel === 'rel="http://www.w3.org/ns/solid/terms#storageDescription"') {
-                        const storage_description_link = link.slice(1, -1); // remove the < and >\
-                        const storage_description_response = await axios.get(storage_description_link);
-                        const storage_description = storage_description_response.data;
-                        await parser.parse(storage_description, (error: any, quad: any) => {
-                            if (quad) {
-                                store.addQuad(quad);
-                            }
-                        });
-                        /**
-                         * Hardcoding now. 
-                         * Note to self that for notification protocol you need to have authorization to read the subscription server.
-                         */
-                        const subscription_server = "http://n063-02b.wall2.ilabt.iminds.be:3000/.notifications/WebhookChannel2023/";
-                        const subscription_type = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-                        const channelLocation = "http://www.w3.org/ns/solid/notifications#WebSocketChannel2023";
-                        // const subscription_server = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#subscription', null)[0].object.value;
-                        // const subscription_type = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].object.value;
-                        // const channelLocation = store.getQuads(null, 'http://www.w3.org/ns/solid/notifications#channelType', null)[0].subject.value;
-                        const subscription_response: SubscriptionServerNotification = {
-                            location: subscription_server,
-                            channelType: subscription_type,
-                            channelLocation: channelLocation
-                        }
-                        return subscription_response;
-                    }
-                    else {
-                        continue;
-                    }
-                }
+        const headers: Record<string, string> = {};
+        if (token?.token_type && token?.access_token) {
+            headers['Authorization'] = `${token.token_type} ${token.access_token}`;
+        }
+
+        const response = await axios.head(resource, { headers });
+        const link_header = response.headers['link'] as string | undefined;
+        if (!link_header) {
+            return undefined;
+        }
+
+        const storage_rel = 'http://www.w3.org/ns/solid/terms#storageDescription';
+        let storage_description_link: string | undefined;
+        for (const part of link_header.split(',')) {
+            const link_match = part.match(/<([^>]+)>/);
+            if (link_match && part.includes(`rel="${storage_rel}"`)) {
+                storage_description_link = link_match[1];
+                break;
             }
         }
+
+        if (!storage_description_link) {
+            return undefined;
+        }
+
+        const resolved_storage_description_link = new URL(storage_description_link, resource).toString();
+        const storage_description_response = await axios.get(resolved_storage_description_link, { headers });
+        await parser.parse(storage_description_response.data, (error: any, quad: any) => {
+            if (error) {
+                throw error;
+            }
+            if (quad) {
+                store.addQuad(quad);
+            }
+        });
+
+        const subscription_predicate = 'http://www.w3.org/ns/solid/notifications#subscription';
+        const channel_type_predicate = 'http://www.w3.org/ns/solid/notifications#channelType';
+        const webhook_channel_type = 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023';
+        const websocket_channel_type = 'http://www.w3.org/ns/solid/notifications#WebSocketChannel2023';
+
+        const subscription_quads = store.getQuads(null, subscription_predicate, null);
+        if (!subscription_quads || subscription_quads.length === 0) {
+            return undefined;
+        }
+
+        const resolvedChannels = subscription_quads.map((quad: any) => {
+            const rawLocation = quad.object.value as string;
+            const location = new URL(rawLocation, resource).toString();
+            const channel_type_quad = store.getQuads(rawLocation, channel_type_predicate, null)[0];
+            return {
+                location,
+                channelType: channel_type_quad?.object?.value
+                    ?? (rawLocation.includes('WebhookChannel2023') ? webhook_channel_type : websocket_channel_type)
+            };
+        });
+
+        const selectedChannel = resolvedChannels.find((channel: { location: string; channelType: string }) => channel.channelType === webhook_channel_type)
+            ?? resolvedChannels[0];
+
+        const subscription_response: SubscriptionServerNotification = {
+            location: selectedChannel.location,
+            channelType: selectedChannel.channelType,
+            channelLocation: selectedChannel.location
+        };
+        return subscription_response;
     } catch (error) {
-        throw new Error("Error while extracting subscription server.");
+        console.warn(`Failed to extract subscription server from ${resource}. Falling back to default webhook channel.`, error);
+        try {
+            const origin = new URL(resource).origin;
+            const fallback = `${origin}/.notifications/WebhookChannel2023/`;
+            return {
+                location: fallback,
+                channelType: 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023',
+                channelLocation: fallback,
+            };
+        } catch (fallbackError) {
+            console.error(`Unable to derive fallback subscription server for ${resource}.`, fallbackError);
+            return undefined;
+        }
     }
 }
 
@@ -90,10 +109,8 @@ export async function extract_ldp_inbox(ldes_stream_location: string) {
 
     const store = new N3.Store();
     try {
-        const token = token_manager.getAccessToken(ldes_stream_location);
         const response = await fetch(ldes_stream_location, {
-            headers: {
-            }
+            headers: {}
         });
         if (response) {
             await parser.parse(await response.text(), (error: any, quad: any) => {
@@ -108,14 +125,11 @@ export async function extract_ldp_inbox(ldes_stream_location: string) {
             const inbox = store.getQuads(null, 'http://www.w3.org/ns/ldp#inbox', null)[0].object.value;
             return ldes_stream_location + inbox;
         }
-        else {
-            throw new Error("The response object is empty.");
-        }
+        throw new Error("The response object is empty.");
     } catch (error) {
         console.error(error);
     }
 }
-
 
 /**
  * Creates a subscription to the Caching Service's HTTP Server for the given inbox location to read the notifications.
@@ -130,23 +144,21 @@ export async function create_subscription(subscription_server: string, location:
             "type": "http://www.w3.org/ns/solid/notifications#WebhookChannel2023",
             "topic": `${location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
-        }
-        const token = token_manager.getAccessToken(location);
+        };
         const response = await fetch(subscription_server, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/ld+json',
             },
             body: JSON.stringify(subscription)
-        })
+        });
         if (response) {
             return response.text();
         }
-        else {
-            console.error("The response object is empty.");
-            throw new Error("The response object is empty.");
-        }
+        console.error("The response object is empty.");
+        throw new Error("The response object is empty.");
     } catch (error) {
-        throw new Error("Error while creating subscription.");
+        console.warn(`Failed to create subscription at ${subscription_server} for ${location}. Continuing without server-side subscription.`, error);
+        return '';
     }
 }

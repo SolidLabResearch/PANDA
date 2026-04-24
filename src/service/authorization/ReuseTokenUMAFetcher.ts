@@ -69,14 +69,19 @@ export class ReuseTokenUMAFetcher {
             return noTokenResponse;
         }
 
+        if (noTokenResponse.status !== 401 && noTokenResponse.status !== 403) {
+            console.warn(`[Fetcher] Non-UMA error response (${noTokenResponse.status}) for ${url}. Returning response without token exchange.`);
+            return noTokenResponse;
+        }
+
         let tokenEndpoint: string, ticket: string;
         try {
             ({ tokenEndpoint, ticket } = parseAuthenticateHeader(noTokenResponse.headers));
             console.log(`[Fetcher] Parsed token endpoint: ${tokenEndpoint}`);
             console.log(`[Fetcher] Parsed ticket: ${ticket}`);
         } catch (err) {
-            console.error(`[Fetcher] Failed to parse WWW-Authenticate header:`, err);
-            throw err;
+            console.warn(`[Fetcher] Failed to parse WWW-Authenticate header for ${url}. Returning original response.`, err);
+            return noTokenResponse;
         }
 
         // Step 2: Check if the ticket has already been used recently (to avoid multiple RPT requests for the same ticket)
@@ -99,7 +104,7 @@ export class ReuseTokenUMAFetcher {
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
-            claim_token: encodeURIComponent(this.claim.token),
+            claim_token: this.claim.token,
             claim_token_format: this.claim.token_format,
         };
 

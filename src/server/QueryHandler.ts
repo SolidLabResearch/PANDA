@@ -39,25 +39,39 @@ export class QueryHandler {
      * @param {any} event_emitter - The event emitter object.
      * @memberof QueryHandler
      */
-    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any) {
+    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any, actor_webid: string = 'unknown-actor', authorization_scope: string[] = []) {
         const aggregation_dispatcher = new AggregationDispatcher(query);
         const to_timestamp = new Date().getTime(); // current time
         const from_timestamp = new Date(to_timestamp - (width)).getTime(); // latest seconds ago
         const query_hashed = hash_string_md5(query);
-        const is_query_unique = query_registry.register_query(query, rules, query_registry, from_timestamp, to_timestamp, logger, query_type, event_emitter);
-        if (await is_query_unique) {
-            console.log(`The query is unique.`);
-            logger.info({ query_id: query_hashed }, `unique_query_registered`);
-        } else {
-            logger.info({ query_id: query_hashed }, `non_unique_query_registered`);
-            for (const [query, connections] of websocket_connections) {
-                // make it work such that you get the messages directly rather than the location of the websocket connection.
-                if (query === query_hashed) {
+        try {
+            const registration = await query_registry.register_query({
+                rspql_query: query,
+                rules,
+                from_timestamp,
+                to_timestamp,
+                logger,
+                query_type,
+                event_emitter,
+                actor_webid,
+                authorization_scope
+            });
+
+            if (registration.should_execute) {
+                console.log(`The query is unique.`);
+                logger.info({ query_id: registration.query_id }, `unique_query_registered`);
+                return;
+            }
+
+            logger.info({ query_id: registration.query_id, reused_from_query_id: registration.reused_from_query_id }, `non_unique_query_registered`);
+            for (const [registeredQueryHash, connections] of websocket_connections) {
+                if (registeredQueryHash === query_hashed) {
                     for (const connection of connections) {
                         connection.send(JSON.stringify(`{
                             "type": "status",
                             "status": "duplicate_query",
-                            "connection_id": ${connection}
+                            "query_id": "${registration.query_id}",
+                            "reused_from_query_id": "${registration.reused_from_query_id || ''}"
                         }`));
                         logger.info({ query_id: query_hashed }, `duplicate_query`);
                     }
@@ -83,6 +97,8 @@ export class QueryHandler {
                     }
                 }
             }
+        } catch (error: any) {
+            logger.error({ query_id: query_hashed, error: error?.message ?? String(error) }, 'query_registration_failed');
         }
 
     }

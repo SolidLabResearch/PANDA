@@ -1,6 +1,6 @@
-const ld_fetch = require('ldfetch');
-const ldfetch = new ld_fetch({});
+import { RdfHttpClient } from "./RdfHttpClient";
 const N3 = require('n3');
+const rdfFetch = new RdfHttpClient();
 
 /**
  * Class for fetching the LDES stream URL from the type index.
@@ -33,7 +33,7 @@ export class TypeIndexLDESLocator {
      */
     public async getLDESStreamURL(metric: string): Promise<string | null> {
         try {
-            const response = await ldfetch.get(this.public_type_index);
+            const response = await rdfFetch.get(this.public_type_index);
             const store = new N3.Store(response.triples);
             const quads = store.getQuads();
             const relevant_ldes_metric = metric;
