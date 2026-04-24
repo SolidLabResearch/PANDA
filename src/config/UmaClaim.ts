@@ -1,6 +1,6 @@
 import { Claim } from "../service/authorization/UserManagedAccessFetcher";
 
-const DEFAULT_UMA_CLAIM_TOKEN = "http://n063-04b.wall2.ilabt.iminds.be/replayer#me";
+const DEFAULT_UMA_CLAIM_TOKEN = "http://localhost:3000/bob/profile/card#me";
 const DEFAULT_UMA_CLAIM_TOKEN_FORMAT = "urn:solidlab:uma:claims:formats:webid";
 
 export function getUmaClaim(): Claim {

@@ -21,9 +21,12 @@
         "test-run": "cd scripts && rm -rf data/.internal/ && npx community-solid-server --config ./pod/config/auth.json -f ./data/ --seededPodConfigJson ./pod/pod_credentials.json --workers 1",
         "benchmark:uma-odrl": "node scripts/benchmark/uma_odrl_flow_benchmark.js",
         "benchmark:uma-odrl:matrix": "node scripts/benchmark/run_uma_odrl_latency_matrix.js",
+        "benchmark:unified-sanity": "node scripts/benchmark/unified_panda_uma_sanity_harness.js",
         "lint:ts": "npx eslint . --report-unused-disable-directives --max-warnings 0",
         "lint:ts:fix": "npx eslint . --ext ts --report-unused-disable-directives --max-warnings 0 --fix",
-        "lint:no-warning": "eslint . --ext ts --quiet --max-warnings 0"
+        "lint:no-warning": "eslint . --ext ts --quiet --max-warnings 0",
+        "benchmark:uma-odrl:strict": "node scripts/benchmark/run_strict_uma_odrl_replayer_benchmarks.js",
+        "uma:start:odrl:logged": "bash scripts/uma/start_odrl_logged.sh"
     },
     "keywords": [],
     "author": "Kushagra Singh Bisen",
@@ -54,7 +57,7 @@
         "bunyan": "^1.8.15",
         "css-auth-login": "^1.0.8",
         "dotenv": "^16.4.7",
-        "eyereasoner": "^18.4.6",
+        "eyeling": "^1.22.16",
         "jsonld": "^8.3.2",
         "jsonwebtoken": "^9.0.2",
         "nock": "^14.0.1",

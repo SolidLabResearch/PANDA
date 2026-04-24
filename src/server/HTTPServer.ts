@@ -81,15 +81,17 @@ export class HTTPServer {
 
                     if (webhook_notification_data.type === 'Add') {
                         this.logger.info({}, 'webhook_notification_received');
-                        const target = webhook_notification_data.target;
-                        const topic = resolveNotificationTopic(webhook_notification_data, target);
+                        const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
+                        const objectTarget = typeof webhook_notification_data.object === 'string' ? webhook_notification_data.object : undefined;
+                        const fetchTarget = objectTarget ?? target;
+                        const topic = resolveNotificationTopic(webhook_notification_data, fetchTarget ?? target);
 
-                        if (!target || !topic) {
+                        if (!fetchTarget || !topic) {
                             this.logger.error({}, 'webhook_notification_missing_target_or_topic');
                             return;
                         }
 
-                        const latest_event_response = await this.uma_fetcher.fetch(target, {
+                        const latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
                             method: 'GET',
                             headers: {
                                 'Accept': 'text/turtle'
@@ -98,6 +100,7 @@ export class HTTPServer {
 
                         if (latest_event_response.ok) {
                             const latest_event = await latest_event_response.text();
+                            this.logger.info({ topic, fetch_target: fetchTarget }, 'webhook_notification_emitting_topic');
                             this.event_emitter.emit(topic, latest_event);
                             this.logger.info({}, 'webhook_notification_processed_and_emitted');
                         } else {

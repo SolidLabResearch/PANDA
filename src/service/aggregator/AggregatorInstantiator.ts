@@ -10,6 +10,8 @@ import { Credentials, aggregation_object } from "../../utils/Types";
 import { DataFactory, Parser } from "n3";
 import { NotificationStreamProcessor } from "./NotificationStreamProcessor";
 import { ContinuousAnomalyMonitoringService } from "../reasoner/ContinuousAnomalyMonitoringService";
+import { getUmaClaim } from "../../config/UmaClaim";
+import { parseAuthenticateHeader } from "../authorization/UserManagedAccessFetcher";
 const WebSocketClient = require('websocket').client;
 const websocketConnection = require('websocket').connection;
 const parser = new RSPQLParser();
@@ -18,6 +20,13 @@ const parser = new RSPQLParser();
  * @class AggregatorInstantiator
  */
 export class AggregatorInstantiator {
+    private static readonly LOW_SPO2_THRESHOLD = 90;
+    private static readonly ALERT_CONTAINER = 'http://localhost:3000/alice/derived/anomaly-alert/';
+    private static readonly ALERT_PREFIX = 'http://example.org/alert#';
+    private static readonly XSD_PREFIX = 'http://www.w3.org/2001/XMLSchema#';
+    private static readonly ALICE_ALERT_WRITE_TOKEN_ENV = 'PANDA_ALICE_WRITE_TOKEN';
+    private static readonly UMA_TICKET_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:uma-ticket';
+    private static readonly WEBID_CLAIM_FORMAT = 'urn:solidlab:uma:claims:formats:webid';
     public query: string;
     public rules: string;
     public rsp_engine: RSPEngine;
@@ -30,6 +39,8 @@ export class AggregatorInstantiator {
     public to_date: Date;
     public client = new WebSocketClient();
     public connection: typeof websocketConnection;
+    private alertContainerInitialized = false;
+    private fallbackAlertWriteAuthorizationHeader: string | null = null;
     private readonly auditContext?: QueryExecutionAuditContext;
     /**
      * Creates an instance of AggregatorInstantiator.
@@ -113,19 +124,42 @@ export class AggregatorInstantiator {
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
                 const window_timestamp_from = object.timestamp_from;
                 const window_timestamp_to = object.timestamp_to;
-                const iterable = object.bindings.values();
-                console.log(object.bindings.size);
-                for (const item of iterable) {
+                const evaluation_now = Date.now();
+                console.log(`[VALIDATION][RSP] evaluation_tick processing_time_epoch=${evaluation_now} processing_time_iso=${new Date(evaluation_now).toISOString()} window_start_epoch=${window_timestamp_from} window_start_iso=${new Date(window_timestamp_from).toISOString()} window_end_epoch=${window_timestamp_to} window_end_iso=${new Date(window_timestamp_to).toISOString()}`);
+                this.debugBindingRowShape(object.bindings);
+                const bindingRows = this.extractBindingRows(object.bindings);
+                console.log(`[VALIDATION][RSP] binding_count=${object.bindings.size}`);
+                console.log(`[VALIDATION][RSP] emitted_row_count=${bindingRows.length}`);
+                for (const [rowIndex, bindingRow] of bindingRows.entries()) {
+                    console.log(`[VALIDATION][RSP] query_row_received row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
+                    this.debugBindingRowVariables(bindingRow, rowIndex);
+                    const sourceEventUri = bindingRow['?s'] ?? bindingRow['s'] ?? this.findUriLikeValue(bindingRow);
+                    const spo2Raw = bindingRow['?spo2Value'] ?? bindingRow['spo2Value'] ?? this.findNumericValue(bindingRow);
+                    const numericSpo2 = Number(spo2Raw);
+                    if (!Number.isFinite(numericSpo2)) {
+                        console.log(`[VALIDATION][RSP] skipped_non_numeric row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
+                        continue;
+                    }
+                    console.log(`[VALIDATION][RSP] extracted_numeric_value spo2Value=${numericSpo2}`);
+                    console.log(`[VALIDATION][RSP] extracted_source_event_uri sourceEventUri=${sourceEventUri ?? 'undefined'}`);
+                    console.log(`[MEASURE][RULE] evaluation_started timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'}`);
                     const aggregation_event_timestamp = new Date().getTime();
-                    const data = item.value;
+                    const data = String(numericSpo2);
                     console.log(`Event Generated is ${data}`);
                     const aggregation_event = this.generate_aggregation_event(data, aggregation_event_timestamp, this.stream_array, window_timestamp_from, window_timestamp_to);
                     console.log(`Aggregation Event is ${aggregation_event}`)
-                    if (this.rules = '') {
+                    console.log(`[VALIDATION][RULE] assertions_for_rule_engine row_index=${rowIndex} assertions=${JSON.stringify(aggregation_event)}`);
+                    if (this.rules === '') {
                         const fetched_rules = await this.fetch_rules_from_query(this.query);
                         if (fetched_rules) {
                             const reasoner = ContinuousAnomalyMonitoringService.getInstance(fetched_rules);
                             const reasoned_result = await reasoner.reason(aggregation_event);
+                            const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                            console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
+                            if (inferredAlert) {
+                                console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
+                                await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                            }
                             const aggregation_object: aggregation_object = {
                                 query_hash: this.hash_string,
                                 aggregation_event: reasoned_result,
@@ -143,9 +177,16 @@ export class AggregatorInstantiator {
                     else {
                         const reasoner = ContinuousAnomalyMonitoringService.getInstance(this.rules);
                         console.log(this.rules);
+                        console.log(`[VALIDATION][RULE] evaluation_started processing_time_epoch=${Date.now()} has_rules_inline=${this.rules !== ''}`);
 
                         const reasoned_result = await reasoner.reason(aggregation_event);
                         console.log(`Reasoned Result is ${reasoned_result}`);
+                        const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                        console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
+                        if (inferredAlert) {
+                            console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
+                            await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                        }
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result,
@@ -156,7 +197,6 @@ export class AggregatorInstantiator {
                         this.sendToServer(aggregation_object_string);
                         this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                     }
-
                 }
             })
         });
@@ -292,6 +332,448 @@ export class AggregatorInstantiator {
         const credentials: Credentials = CREDENTIALS;
         const session_credentials = credentials[stream_name];
         return session_credentials;
+    }
+
+    private parseBindingRow(item: any): Record<string, string> {
+        const row: Record<string, string> = {};
+        if (!item || typeof item !== 'object') {
+            return row;
+        }
+        if (typeof (item as any).forEach === 'function') {
+            (item as any).forEach((value: any, key: any) => {
+                const normalizedKey = this.normalizeBindingKey(key);
+                const normalizedValue = this.normalizeBindingValue(value);
+                row[normalizedKey] = normalizedValue;
+                for (const alias of this.generateKeyAliases(normalizedKey)) {
+                    if (row[alias] === undefined) {
+                        row[alias] = normalizedValue;
+                    }
+                }
+            });
+            return row;
+        }
+        for (const [key, value] of Object.entries(item as Record<string, any>)) {
+            const normalizedValue = this.normalizeBindingValue(value);
+            row[key] = normalizedValue;
+            for (const alias of this.generateKeyAliases(key)) {
+                if (row[alias] === undefined) {
+                    row[alias] = normalizedValue;
+                }
+            }
+        }
+        return row;
+    }
+
+    private extractBindingRows(item: any): Record<string, string>[] {
+        if (!item || typeof item !== 'object') {
+            return [];
+        }
+
+        if (typeof item.forEach === 'function') {
+            const entries: Array<[any, any]> = [];
+            item.forEach((value: any, key: any) => entries.push([key, value]));
+            if (entries.length === 0) {
+                return [];
+            }
+            const looksLikeSingleBindingRow = entries.every(([key]) => this.isBindingVariableKey(key));
+            if (looksLikeSingleBindingRow) {
+                return [this.parseBindingRow(item)];
+            }
+            return entries
+                .map(([, value]) => this.parseBindingRow(value))
+                .filter((row) => Object.keys(row).length > 0);
+        }
+
+        if (typeof item[Symbol.iterator] === 'function' && !Array.isArray(item)) {
+            const rows: Record<string, string>[] = [];
+            for (const element of item as Iterable<any>) {
+                const row = this.parseBindingRow(element);
+                if (Object.keys(row).length > 0) {
+                    rows.push(row);
+                }
+            }
+            if (rows.length > 0) {
+                return rows;
+            }
+        }
+
+        const fallbackRow = this.parseBindingRow(item);
+        return Object.keys(fallbackRow).length > 0 ? [fallbackRow] : [];
+    }
+
+    private isBindingVariableKey(key: any): boolean {
+        if (typeof key === 'string') {
+            return key.startsWith('?') || /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+        }
+        if (!key || typeof key !== 'object') {
+            return false;
+        }
+        const candidate = key.value ?? key.variable ?? key.name ?? key.id;
+        return typeof candidate === 'string' && candidate.length > 0;
+    }
+
+    private normalizeBindingKey(key: any): string {
+        if (typeof key === 'string') {
+            return key;
+        }
+        if (!key || typeof key !== 'object') {
+            return String(key);
+        }
+
+        const variableNameCandidate = key.value ?? key.id ?? key.variable ?? key.name;
+        if (typeof variableNameCandidate === 'string' && variableNameCandidate.length > 0) {
+            const trimmed = variableNameCandidate.trim();
+            if (trimmed.startsWith('?')) {
+                return trimmed;
+            }
+            if (!trimmed.includes(':') && !trimmed.startsWith('http')) {
+                return `?${trimmed}`;
+            }
+            return trimmed;
+        }
+
+        if (typeof key.toString === 'function') {
+            const rendered = key.toString();
+            if (rendered && rendered !== '[object Object]') {
+                return rendered;
+            }
+        }
+        return String(key);
+    }
+
+    private normalizeBindingValue(value: any): string {
+        if (value === undefined || value === null) {
+            return String(value);
+        }
+        if (typeof value !== 'object') {
+            return String(value);
+        }
+        if (value.value !== undefined) {
+            return String(value.value);
+        }
+        if (typeof value.id === 'string') {
+            return value.id;
+        }
+        if (typeof value.toString === 'function') {
+            const rendered = value.toString();
+            if (rendered && rendered !== '[object Object]') {
+                return rendered;
+            }
+        }
+        return String(value);
+    }
+
+    private generateKeyAliases(key: string): string[] {
+        if (!key || key === '[object Object]') {
+            return [];
+        }
+        if (key.startsWith('?')) {
+            return [key.slice(1)];
+        }
+        if (!key.includes(':') && !key.startsWith('http')) {
+            return [`?${key}`];
+        }
+        return [];
+    }
+
+    private findNumericValue(bindingRow: Record<string, string>): string | undefined {
+        const candidate = Object.values(bindingRow).find((value) => Number.isFinite(Number(value)));
+        return candidate;
+    }
+
+    private findUriLikeValue(bindingRow: Record<string, string>): string | undefined {
+        const candidate = Object.values(bindingRow).find((value) => typeof value === 'string' && /^https?:\/\//.test(value));
+        return candidate;
+    }
+
+    private reasonerOutputContainsAlert(reasonedResult: string): boolean {
+        return reasonedResult.includes('alert');
+    }
+
+    private debugBindingRowVariables(bindingRow: Record<string, string>, rowIndex: number): void {
+        const variableNames = Object.keys(bindingRow);
+        console.log(`[VALIDATION][RSP] row_variables row_index=${rowIndex} variable_names=${JSON.stringify(variableNames)}`);
+        const details = variableNames.map((name) => {
+            const value = bindingRow[name];
+            const numericCandidate = Number(value);
+            return {
+                variable: name,
+                value,
+                datatype: Number.isFinite(numericCandidate) ? 'numeric' : 'string_or_iri',
+            };
+        });
+        console.log(`[VALIDATION][RSP] row_values row_index=${rowIndex} details=${JSON.stringify(details)}`);
+    }
+
+    private debugBindingRowShape(item: any): void {
+        const debugPrefix = '[VALIDATION][RSP][ROW_DEBUG]';
+        const safeSerialize = (value: any): string => {
+            try {
+                const seen = new WeakSet<object>();
+                return JSON.stringify(value, (_key, nestedValue) => {
+                    if (nestedValue instanceof Map) {
+                        return {
+                            __type: 'Map',
+                            entries: Array.from(nestedValue.entries()).map(([mapKey, mapValue]) => ({
+                                key: this.describeNested(mapKey),
+                                value: this.describeNested(mapValue),
+                            })),
+                        };
+                    }
+                    if (nestedValue && typeof nestedValue === 'object') {
+                        if (seen.has(nestedValue)) {
+                            return '[Circular]';
+                        }
+                        seen.add(nestedValue);
+                    }
+                    return nestedValue;
+                });
+            } catch (error) {
+                return `[[unserializable:${(error as Error).message}]]`;
+            }
+        };
+
+        console.log(`${debugPrefix} raw=${safeSerialize(item)}`);
+        console.log(`${debugPrefix} typeof=${typeof item} tag=${Object.prototype.toString.call(item)}`);
+
+        if (item && typeof item === 'object') {
+            console.log(`${debugPrefix} keys=${safeSerialize(Object.keys(item))}`);
+            if (typeof item.entries === 'function') {
+                const entries = Array.from(item.entries() as Iterable<[any, any]>).slice(0, 10).map(([key, value]) => ({
+                    key: this.describeNested(key),
+                    value: this.describeNested(value),
+                }));
+                console.log(`${debugPrefix} entries=${safeSerialize(entries)}`);
+            } else if (typeof item[Symbol.iterator] === 'function') {
+                const entries = Array.from(item as Iterable<any>).slice(0, 10).map((entry) => this.describeNested(entry));
+                console.log(`${debugPrefix} iterable_entries=${safeSerialize(entries)}`);
+            }
+
+            for (const [outerKey, outerValue] of Object.entries(item as Record<string, any>)) {
+                if (outerValue && typeof outerValue === 'object') {
+                    const nestedKeys = Object.keys(outerValue);
+                    const nestedValue = (outerValue as any).value;
+                    console.log(`${debugPrefix} nested key=${outerKey} nested_keys=${safeSerialize(nestedKeys)} nested_value=${safeSerialize(nestedValue)}`);
+                }
+            }
+        }
+    }
+
+    private describeNested(value: any): any {
+        if (value === null || value === undefined) {
+            return value;
+        }
+        if (typeof value !== 'object') {
+            return value;
+        }
+        return {
+            type: value.constructor?.name ?? typeof value,
+            keys: Object.keys(value),
+            value: value.value,
+            id: value.id,
+            termType: value.termType,
+            toString: typeof value.toString === 'function' ? value.toString() : undefined,
+        };
+    }
+
+    private resolveAlertWriteToken(): string | null {
+        const rawToken = process.env[AggregatorInstantiator.ALICE_ALERT_WRITE_TOKEN_ENV]?.trim() ?? '';
+        const hasToken = rawToken.length > 0;
+        const tokenPreview = hasToken
+            ? `${rawToken.slice(0, 8)}...${rawToken.slice(-8)}`
+            : 'missing';
+        let tokenStatus = 'missing';
+        let tokenExpIso = 'n/a';
+
+        if (hasToken) {
+            tokenStatus = 'present';
+            const tokenParts = rawToken.split('.');
+            if (tokenParts.length === 3) {
+                try {
+                    const payloadJson = Buffer.from(tokenParts[1], 'base64url').toString('utf8');
+                    const payload = JSON.parse(payloadJson) as { exp?: number };
+                    if (payload.exp) {
+                        tokenExpIso = new Date(payload.exp * 1000).toISOString();
+                        if (Date.now() >= payload.exp * 1000) {
+                            tokenStatus = 'expired';
+                        } else {
+                            tokenStatus = 'valid_jwt';
+                        }
+                    }
+                } catch {
+                    tokenStatus = 'present_non_parseable_jwt';
+                }
+            }
+        }
+
+        console.log(`[VALIDATION][ALERT][TOKEN] env=${AggregatorInstantiator.ALICE_ALERT_WRITE_TOKEN_ENV} status=${tokenStatus} exp=${tokenExpIso} preview=${tokenPreview}`);
+        if (!hasToken || tokenStatus === 'expired') {
+            return null;
+        }
+        return rawToken;
+    }
+
+    private formatClaimToken(claimToken: string, claimTokenFormat: string): string {
+        if (claimTokenFormat === AggregatorInstantiator.WEBID_CLAIM_FORMAT) {
+            return encodeURIComponent(claimToken);
+        }
+        return claimToken;
+    }
+
+    private async resolveAlertWriteAuthorizationHeader(): Promise<string | null> {
+        const configuredToken = this.resolveAlertWriteToken();
+        if (configuredToken) {
+            return `Bearer ${configuredToken}`;
+        }
+        if (this.fallbackAlertWriteAuthorizationHeader) {
+            return this.fallbackAlertWriteAuthorizationHeader;
+        }
+        const claim = getUmaClaim();
+        try {
+            const challengeResponse = await fetch(AggregatorInstantiator.ALERT_CONTAINER, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/turtle' },
+                body: '',
+            });
+            if (challengeResponse.status !== 401) {
+                console.log(`[VALIDATION][ALERT][TOKEN] fallback_challenge_unexpected_status status=${challengeResponse.status}`);
+                return null;
+            }
+            const { tokenEndpoint, ticket } = parseAuthenticateHeader(challengeResponse.headers as Headers);
+            const tokenResponse = await fetch(tokenEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: AggregatorInstantiator.UMA_TICKET_GRANT_TYPE,
+                    ticket,
+                    claim_token: this.formatClaimToken(claim.token, claim.token_format),
+                    claim_token_format: claim.token_format,
+                }),
+            });
+            const tokenBody = await tokenResponse.text().catch(() => '');
+            if (tokenResponse.status !== 200) {
+                console.log(`[VALIDATION][ALERT][TOKEN] fallback_exchange_failed status=${tokenResponse.status} body=${JSON.stringify(tokenBody)}`);
+                return null;
+            }
+            let parsedToken: { access_token?: string; token_type?: string } = {};
+            try {
+                parsedToken = JSON.parse(tokenBody) as { access_token?: string; token_type?: string };
+            } catch {
+                console.log(`[VALIDATION][ALERT][TOKEN] fallback_exchange_non_json body=${JSON.stringify(tokenBody)}`);
+                return null;
+            }
+            if (!parsedToken.access_token) {
+                console.log(`[VALIDATION][ALERT][TOKEN] fallback_exchange_missing_access_token body=${JSON.stringify(tokenBody)}`);
+                return null;
+            }
+            const tokenType = parsedToken.token_type || 'Bearer';
+            this.fallbackAlertWriteAuthorizationHeader = `${tokenType} ${parsedToken.access_token}`;
+            console.log(`[VALIDATION][ALERT][TOKEN] fallback_token_acquired type=${tokenType}`);
+            return this.fallbackAlertWriteAuthorizationHeader;
+        } catch (error) {
+            const err = error as Error;
+            console.log(`[VALIDATION][ALERT][TOKEN] fallback_exchange_error message=${JSON.stringify(err.message)} stack=${JSON.stringify(err.stack ?? '')}`);
+            return null;
+        }
+    }
+
+    private logAlertHttpRequestTrace(url: string, method: string, headers: Record<string, string>): void {
+        const headerKeys = Object.keys(headers).sort().join(',');
+        const hasAuthHeader = Boolean(headers.Authorization);
+        console.log(`[VALIDATION][ALERT][HTTP] request method=${method} url=${url} header_keys=${headerKeys} authorization_present=${hasAuthHeader}`);
+    }
+
+    private async ensureAlertContainerReady(): Promise<void> {
+        if (this.alertContainerInitialized) {
+            return;
+        }
+        const alertAuthorization = await this.resolveAlertWriteAuthorizationHeader();
+        const setupHeaders: Record<string, string> = {
+            'Content-Type': 'text/turtle',
+            'Link': '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+        };
+        if (alertAuthorization) {
+            setupHeaders.Authorization = alertAuthorization;
+        }
+        this.logAlertHttpRequestTrace(AggregatorInstantiator.ALERT_CONTAINER, 'PUT', setupHeaders);
+        const setupResponse = await fetch(AggregatorInstantiator.ALERT_CONTAINER, {
+            method: 'PUT',
+            headers: setupHeaders,
+            body: ''
+        });
+        console.log(`[VALIDATION][ALERT] container_setup_request_sent url=${AggregatorInstantiator.ALERT_CONTAINER}`);
+        console.log(`[VALIDATION][ALERT] container_setup_response_received status=${setupResponse.status}`);
+        this.alertContainerInitialized = setupResponse.ok || setupResponse.status === 409 || setupResponse.status === 412;
+    }
+
+    private async materializeLowSpo2Alert(sourceEventUri: string | undefined, spo2Value: number): Promise<void> {
+        await this.ensureAlertContainerReady();
+        const eventId = sourceEventUri ?? 'unknown';
+        console.log(`[MEASURE][ALERT] write_start timestamp=${new Date().toISOString()} event_id=${eventId}`);
+        const processingTimestamp = new Date().toISOString();
+        const sourcePart = sourceEventUri && sourceEventUri.startsWith('http')
+            ? `<${sourceEventUri}>`
+            : `"${(sourceEventUri ?? 'unknown').replace(/"/g, '\\"')}"`;
+        const alertBody = `@prefix alert: <${AggregatorInstantiator.ALERT_PREFIX}> .
+@prefix xsd: <${AggregatorInstantiator.XSD_PREFIX}> .
+
+<> a alert:LowValueDetected ;
+   alert:sourceEvent ${sourcePart} ;
+   alert:observedValue "${spo2Value}"^^xsd:decimal ;
+   alert:processedAt "${processingTimestamp}"^^xsd:dateTime .
+`;
+        const slug = `low-spo2-${hash_string_md5(`${sourceEventUri ?? 'unknown'}|${spo2Value}`)}`;
+        const alertAuthorization = await this.resolveAlertWriteAuthorizationHeader();
+        const writeHeaders: Record<string, string> = {
+            'Content-Type': 'text/turtle',
+            'Slug': slug,
+        };
+        if (alertAuthorization) {
+            writeHeaders.Authorization = alertAuthorization;
+        }
+        let tokenExpired = false;
+        if (alertAuthorization) {
+            const bearerToken = alertAuthorization.replace(/^Bearer\s+/i, '');
+            const tokenParts = bearerToken.split('.');
+            if (tokenParts.length === 3) {
+                try {
+                    const payloadJson = Buffer.from(tokenParts[1], 'base64url').toString('utf8');
+                    const payload = JSON.parse(payloadJson) as { exp?: number };
+                    if (payload.exp) {
+                        tokenExpired = Date.now() >= payload.exp * 1000;
+                    }
+                } catch {
+                    tokenExpired = false;
+                }
+            }
+        }
+        this.logAlertHttpRequestTrace(AggregatorInstantiator.ALERT_CONTAINER, 'POST', writeHeaders);
+        console.log(`[VALIDATION][ALERT] write_request_sent event_id=${eventId} timestamp=${new Date().toISOString()}`);
+        console.log(`[VALIDATION][ALERT][WRITE_REQUEST] event_id=${eventId} url=${AggregatorInstantiator.ALERT_CONTAINER} method=POST header_keys=${Object.keys(writeHeaders).sort().join(',')} authorization_present=${Boolean(writeHeaders.Authorization)} token_expired=${tokenExpired}`);
+        try {
+            const writeResponse = await fetch(AggregatorInstantiator.ALERT_CONTAINER, {
+                method: 'POST',
+                headers: writeHeaders,
+                body: alertBody,
+            });
+            console.log(`[VALIDATION][ALERT] write_response_received event_id=${eventId} timestamp=${new Date().toISOString()} status=${writeResponse.status}`);
+            const responseBody = await writeResponse.text().catch(() => '');
+            const locationHeader = writeResponse.headers.get('location') ?? '';
+            const headerPairs = Array.from(writeResponse.headers.entries()).map(([key, value]) => `${key}:${value}`);
+            console.log(`[VALIDATION][ALERT][WRITE_RESPONSE] event_id=${eventId} status=${writeResponse.status} status_text=${writeResponse.statusText} location=${locationHeader || 'none'} headers=${JSON.stringify(headerPairs)} body=${JSON.stringify(responseBody)}`);
+            const writtenResource = locationHeader || null;
+            if (writeResponse.ok && writtenResource) {
+                console.log(`[MEASURE][ALERT] write_success timestamp=${new Date().toISOString()} event_id=${eventId} resource=${writtenResource}`);
+            } else if (writeResponse.ok) {
+                console.log(`[MEASURE][ALERT] write_success timestamp=${new Date().toISOString()} event_id=${eventId} resource=${AggregatorInstantiator.ALERT_CONTAINER}`);
+            } else {
+                console.log(`[VALIDATION][ALERT][WRITE_ERROR] event_id=${eventId} status=${writeResponse.status} location=${locationHeader || 'none'} message=${JSON.stringify(responseBody)}`);
+            }
+        } catch (error) {
+            const err = error as Error;
+            console.log(`[VALIDATION][ALERT] write_error event_id=${eventId} timestamp=${new Date().toISOString()}`);
+            console.log(`[VALIDATION][ALERT][WRITE_ERROR] event_id=${eventId} message=${JSON.stringify(err.message)} stack=${JSON.stringify(err.stack ?? '')}`);
+        }
     }
 
 }

@@ -6,24 +6,26 @@ This harness measures end-to-end latency from posting a webhook notification to 
 
 - `webhook_latency_benchmark.js`: benchmark runner
 - `benchmark.query.rspql.example`: example websocket query payload
-- `benchmark.targets.txt.example`: example webhook target list
 
 ## Required setup
 
 1. Start the PANDA server on `http://localhost:8080/`.
-2. Ensure each target in the targets file resolves to a resource that PANDA can fetch through the normal code path.
-3. For the UMA run, make sure the `derived` resources trigger the full `ReuseTokenUMAFetcher` flow.
-4. For the baseline run, use a public or otherwise directly readable resource path.
+2. Start CSS on `http://localhost:3000/` with notifications enabled.
+3. Ensure `PANDA_MONITOR_LOG_FILE` points to the PANDA log file so sanity markers can be verified.
+4. The benchmark will auto-register webhook preflight on `.notifications/WebhookChannel2023/`, run one sanity POST on `/alice/acc-x/`, and fail fast unless PANDA logs:
+   - `webhook_notification_data_received`
+   - `webhook_notification_received`
+   - `webhook_notification_emitting_topic`
 
 ## Example
 
 ```bash
 mkdir -p benchmark-input
 cp scripts/benchmark/benchmark.query.rspql.example benchmark-input/benchmark.query.rspql
-cp scripts/benchmark/benchmark.targets.txt.example benchmark-input/benchmark.targets.txt
 
 QUERY_FILE=$PWD/benchmark-input/benchmark.query.rspql \
-TARGETS_FILE=$PWD/benchmark-input/benchmark.targets.txt \
+PANDA_MONITOR_LOG_FILE=$PWD/benchmark-results/panda-unified-trace-live-latest.stdout.log \
+REPLAY_POST_URL=http://localhost:3000/alice/acc-x/ \
 ITERATIONS=30 \
 WARMUP_ITERATIONS=5 \
 node scripts/benchmark/webhook_latency_benchmark.js
@@ -35,6 +37,10 @@ The runner writes:
 
 - a per-iteration CSV in `benchmark-results/`
 - a JSON summary with average latency, p95 latency, and throughput
+- stdout sections for:
+  - webhook registration response
+  - sanity notification proof
+  - benchmark raw rows
 
 ## UMA + ODRL flow benchmark
 
@@ -130,6 +136,21 @@ Useful toggles:
 
 - `DEBUG_UMA_LATENCY=1`: alias for `UMA_TRACE_TIMINGS=1`
 - `PANDA_UMA_REUSE_ACCESS_TOKEN=true`: first try cached access token before challenge/token exchange (for reuse experiments)
+
+
+### Strict benchmark with live ODRL log proof
+
+Use the PANDA helper to start UMA with reproducible log capture:
+
+```bash
+cd /Users/kushbisen/Code/PANDA\ Platform/panda
+npm run uma:start:odrl:logged
+# copy the printed export command, then run:
+export PANDA_UMA_ODRL_LOG_FILE="/absolute/path/to/panda/benchmark-results/uma-live-logs/uma-odrl-<timestamp>.log"
+npm run benchmark:uma-odrl:strict
+```
+
+The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing.
 
 ### Scenario matrix runner
 

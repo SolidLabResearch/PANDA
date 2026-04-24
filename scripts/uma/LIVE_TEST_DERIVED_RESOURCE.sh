@@ -98,7 +98,7 @@ echo "STEP 0.5: Seed one source observation in /alice/acc-x/"
 SEED_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
   "http://localhost:3000/alice/acc-x/" \
   -H "Content-Type: text/turtle" \
-  -d '<http://example.org/obs-live-test> <http://purl.org/dc/terms/issued> "2026-04-17T13:56:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .')
+  -d '<http://example.org/obs-live-test> <https://saref.etsi.org/core/hasTimestamp> "2026-04-17T13:56:00.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .')
 echo "Seed POST status: $SEED_STATUS"
 echo ""
 sleep 1

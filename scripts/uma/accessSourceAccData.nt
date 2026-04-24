@@ -1,0 +1,14 @@
+PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
+PREFIX ex: <http://example.org/>
+PREFIX dcterms: <http://purl.org/dc/terms/>
+
+ex:sourceAccXAgreement a odrl:Agreement ;
+    odrl:uid <urn:ucp:policy:test-source-acc-x> ;
+    dcterms:description "Allow Bob to read Alice's source accelerometer-x data" ;
+    odrl:permission ex:sourceAccXPermission .
+
+ex:sourceAccXPermission a odrl:Permission ;
+    odrl:target <http://localhost:3000/alice/acc-x/> ;
+    odrl:assigner <http://localhost:3000/alice/profile/card#me> ;
+    odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+    odrl:action odrl:read .

@@ -1,6 +1,17 @@
 # UMA Benchmark Runbook (Strict)
 
 ## 1) Clean startup order
+Preferred (reproducible strict benchmark setup):
+```bash
+cd /Users/kushbisen/Code/PANDA\ Platform/panda
+npm run uma:start:odrl:logged
+```
+This prints a timestamped log file and the exact export command for strict preflight:
+```bash
+export PANDA_UMA_ODRL_LOG_FILE="/absolute/path/to/panda/benchmark-results/uma-live-logs/uma-odrl-<timestamp>.log"
+```
+
+Manual equivalent (if needed):
 1. Start UMA AS + CSS:
 ```bash
 cd /Users/kushbisen/Code/PANDA\ Platform/user-managed-access
@@ -17,7 +28,7 @@ corepack yarn run script:setup-alice-derived
 ```bash
 curl -sS -X POST http://localhost:3000/alice/acc-x/ \
   -H "Content-Type: text/turtle" \
-  -d '<http://example.org/obs-runbook> <http://purl.org/dc/terms/issued> "2026-04-17T16:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .'
+  -d '<http://example.org/obs-runbook> <https://saref.etsi.org/core/hasTimestamp> "2026-04-17T16:00:00.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .'
 ```
 2. Optional strict matrix policy+enforcement seed/proof:
 ```bash

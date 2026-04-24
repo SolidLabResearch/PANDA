@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PANDA_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+UMA_REPO_DIR="$(cd "$PANDA_ROOT/../user-managed-access" && pwd)"
+
 OUT_DIR="${PANDA_UMA_OUT_DIR:-$PWD/benchmark-results/uma-proof-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT_DIR"
 LOG="$OUT_DIR/results.log"
 
 RESOURCE="${PANDA_UMA_RESOURCE:-http://localhost:3000/alice/derived/acc-x/}"
 WRONG_TARGET="${PANDA_UMA_WRONG_TARGET_RESOURCE:-http://localhost:3000/alice/derived/acc-y/}"
+SOURCE_POLICY_FILE="${PANDA_UMA_SOURCE_POLICY_FILE:-$PANDA_ROOT/scripts/uma/accessSourceAccData.nt}"
 POLICY_ENDPOINT="${PANDA_UMA_POLICY_ENDPOINT:-http://localhost:4000/uma/policies}"
 TOKEN_ENDPOINT="${PANDA_UMA_TOKEN_ENDPOINT:-http://localhost:4000/uma/token}"
 SOURCE_SEED_ENDPOINT="${PANDA_UMA_SOURCE_SEED_ENDPOINT:-http://localhost:3000/alice/acc-x/}"
@@ -88,10 +93,20 @@ post_policy() {
     --data-binary "@$file"
 }
 
+bootstrap_alice_streams() {
+  log "bootstrap:alice_streams"
+  yarn --cwd "$UMA_REPO_DIR" script:setup-alice-derived >>"$LOG" 2>&1
+}
+
 main() {
   log "out_dir=$OUT_DIR"
   curl -sS -o /dev/null -w "css:%{http_code}\n" http://localhost:3000/ | tee -a "$LOG"
   curl -sS -o /dev/null -w "uma:%{http_code}\n" http://localhost:4000/uma/.well-known/uma2-configuration | tee -a "$LOG"
+
+  bootstrap_alice_streams
+
+  post_policy "$SOURCE_POLICY_FILE" | tee "$OUT_DIR/policy_source_policy.http.txt" >/dev/null
+  log "policy_loaded:source_policy:$(head -n1 "$OUT_DIR/policy_source_policy.http.txt")"
 
   write_policy_files
   for p in simple_allow.ttl moderate_constrained.ttl complex_constrained.ttl; do
@@ -103,7 +118,7 @@ main() {
   SEED_STATUS="$(
     curl -sS -o /dev/null -w "%{http_code}" -X POST "$SOURCE_SEED_ENDPOINT" \
       -H "Content-Type: text/turtle" \
-      -d "<http://example.org/obs-$(date +%s)> <http://purl.org/dc/terms/issued> \"2026-04-17T16:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
+      -d "<http://example.org/obs-$(date +%s)> <https://saref.etsi.org/core/hasTimestamp> \"2026-04-17T16:00:00.000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."
   )"
   log "seed_status:$SEED_STATUS"
 

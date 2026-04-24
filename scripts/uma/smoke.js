@@ -40,6 +40,31 @@ function assert(condition, message) {
   }
 }
 
+function safeRead(filePath) {
+  if (!filePath) return "";
+  try {
+    return require("fs").readFileSync(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertOdrlProof(logChunk, resource, allowClaim, denyClaim) {
+  assert(/OdrlAuthorizer/.test(logChunk), "ODRL proof missing: OdrlAuthorizer log marker not found");
+  const allowPattern = new RegExp(
+    `Evaluating Request \\[S R AR\\]: \\[${escapeRegExp(allowClaim)} ${escapeRegExp(resource)} `
+  );
+  const denyPattern = new RegExp(
+    `Evaluating Request \\[S R AR\\]: \\[${escapeRegExp(denyClaim)} ${escapeRegExp(resource)} `
+  );
+  assert(allowPattern.test(logChunk), `ODRL proof missing allow evaluation log for ${allowClaim}`);
+  assert(denyPattern.test(logChunk), `ODRL proof missing deny evaluation log for ${denyClaim}`);
+}
+
 async function challenge(resource, strictStatus = true) {
   const response = await fetch(resource, { method: "GET" });
   const wwwAuthenticate = response.headers.get("WWW-Authenticate");
@@ -130,9 +155,12 @@ async function main() {
   const requireChallenge = env("PANDA_UMA_REQUIRE_UMA_CHALLENGE", "true").toLowerCase() === "true";
   const requireDenyPath = env("PANDA_UMA_REQUIRE_DENY_PATH", "true").toLowerCase() === "true";
   const strict401 = env("PANDA_UMA_REQUIRE_401_CHALLENGE", "true").toLowerCase() === "true";
+  const requireOdrlProof = env("PANDA_UMA_REQUIRE_ODRL_PROOF", "true").toLowerCase() === "true";
+  const odrlLogFile = env("PANDA_UMA_ODRL_LOG_FILE", "");
   const bootstrapPolicy = env("PANDA_UMA_BOOTSTRAP_ALLOW_POLICY", "true").toLowerCase() === "true";
   const policyEndpoint = env("PANDA_UMA_POLICY_ENDPOINT", "http://localhost:4000/uma/policies");
   const ownerWebId = env("PANDA_UMA_POLICY_OWNER_WEBID", "http://localhost:3000/alice/profile/card#me");
+  const odrlLogBefore = odrlLogFile ? safeRead(odrlLogFile) : "";
 
   console.log(`[smoke:uma] Resource=${resource}`);
   console.log(`[smoke:uma] WrongTarget=${wrongTargetResource}`);
@@ -196,6 +224,15 @@ async function main() {
   const reuseFetch = await authorizedFetch(resource, tokenType, accessToken);
   console.log(`[smoke:uma] Reuse fetch status=${reuseFetch.status}`);
   assert(reuseFetch.status === 200, `Expected reuse fetch 200, got ${reuseFetch.status}`);
+
+  if (requireOdrlProof) {
+    assert(odrlLogFile, "PANDA_UMA_ODRL_LOG_FILE is required when PANDA_UMA_REQUIRE_ODRL_PROOF=true");
+    const odrlLogAfter = safeRead(odrlLogFile);
+    const delta = odrlLogAfter.slice(odrlLogBefore.length);
+    assertOdrlProof(delta, resource, allowClaimToken, denyClaimToken);
+    console.log(`[smoke:uma] ODRL proof verified in ${odrlLogFile}`);
+  }
+
   console.log("[smoke:uma] UMA strict smoke/preflight passed.");
 }
 

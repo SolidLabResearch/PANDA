@@ -54,21 +54,32 @@ export async function extract_subscription_server(resource: string): Promise<Sub
 
         const subscription_predicate = 'http://www.w3.org/ns/solid/notifications#subscription';
         const channel_type_predicate = 'http://www.w3.org/ns/solid/notifications#channelType';
+        const webhook_channel_type = 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023';
+        const websocket_channel_type = 'http://www.w3.org/ns/solid/notifications#WebSocketChannel2023';
 
-        const subscription_quad = store.getQuads(null, subscription_predicate, null)[0];
-        if (!subscription_quad) {
+        const subscription_quads = store.getQuads(null, subscription_predicate, null);
+        if (!subscription_quads || subscription_quads.length === 0) {
             return undefined;
         }
 
-        const channel_location = subscription_quad.object.value;
-        const channel_type_quad = store.getQuads(channel_location, channel_type_predicate, null)[0];
-        const channel_type = channel_type_quad?.object?.value ??
-            'http://www.w3.org/ns/solid/notifications#WebSocketChannel2023';
+        const resolvedChannels = subscription_quads.map((quad: any) => {
+            const rawLocation = quad.object.value as string;
+            const location = new URL(rawLocation, resource).toString();
+            const channel_type_quad = store.getQuads(rawLocation, channel_type_predicate, null)[0];
+            return {
+                location,
+                channelType: channel_type_quad?.object?.value
+                    ?? (rawLocation.includes('WebhookChannel2023') ? webhook_channel_type : websocket_channel_type)
+            };
+        });
+
+        const selectedChannel = resolvedChannels.find((channel: { location: string; channelType: string }) => channel.channelType === webhook_channel_type)
+            ?? resolvedChannels[0];
 
         const subscription_response: SubscriptionServerNotification = {
-            location: channel_location,
-            channelType: channel_type,
-            channelLocation: channel_location
+            location: selectedChannel.location,
+            channelType: selectedChannel.channelType,
+            channelLocation: selectedChannel.location
         };
         return subscription_response;
     } catch (error) {
