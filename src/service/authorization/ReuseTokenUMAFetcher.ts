@@ -104,7 +104,7 @@ export class ReuseTokenUMAFetcher {
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
-            claim_token: this.claim.token,
+            claim_token: encodeURIComponent(this.claim.token),
             claim_token_format: this.claim.token_format,
         };
 

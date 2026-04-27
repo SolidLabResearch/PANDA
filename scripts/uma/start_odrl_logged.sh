@@ -47,6 +47,10 @@ wait_for_stack() {
   return 1
 }
 
+echo "[uma:start:logged] Clearing previous state ($UMA_DIR/packages/css/tmp-file-backed)..."
+rm -rf "$UMA_DIR/packages/css/tmp-file-backed"
+rm -rf "$UMA_DIR/packages/uma/tmp-file-backed"
+
 if [[ "$MODE" == "--foreground" ]]; then
   {
     echo "[uma:start:logged] $(date -u +%Y-%m-%dT%H:%M:%SZ) Starting UMA in foreground"
@@ -79,10 +83,16 @@ if ! wait_for_stack; then
 fi
 
 if [[ "$SEED_DERIVED" == "true" ]]; then
-  if corepack yarn run script:setup-alice-derived >> "$LOG_FILE" 2>&1; then
-    echo "[uma:start:logged] Derived resources seeded" >> "$LOG_FILE"
+  # Re-create the derived resources that the missing script:setup-alice-derived would have created
+  echo "[uma:start:logged] Seeding derived resources (alice/spo2/, alice/derived/)..." >> "$LOG_FILE"
+  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/spo2"
+  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/derived/acc-x"
+  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/derived/acc-y"
+  
+  if corepack yarn run script:seed >> "$LOG_FILE" 2>&1; then
+    echo "[uma:start:logged] Derived policies seeded via script:seed" >> "$LOG_FILE"
   else
-    echo "[uma:start:logged] WARNING: script:setup-alice-derived failed (check $LOG_FILE)" >&2
+    echo "[uma:start:logged] WARNING: script:seed failed (check $LOG_FILE)" >&2
   fi
 fi
 

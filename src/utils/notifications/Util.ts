@@ -1,11 +1,13 @@
-import axios from 'axios';
 import { SubscriptionServerNotification } from '../Types';
 import * as AGGREGATOR_SETUP from '../../config/aggregator_setup.json';
 import { TokenManagerService } from '../../service/authorization/TokenManagerService';
+import { ReuseTokenUMAFetcher } from '../../service/authorization/ReuseTokenUMAFetcher';
+import { getUmaClaim } from '../../config/UmaClaim';
 
 const N3 = require('n3');
 const parser = new N3.Parser();
 const token_manager = TokenManagerService.getInstance();
+const uma_fetcher = new ReuseTokenUMAFetcher(getUmaClaim());
 
 /**
  * Extracts the subscription server from the given resource.
@@ -15,14 +17,15 @@ const token_manager = TokenManagerService.getInstance();
 export async function extract_subscription_server(resource: string): Promise<SubscriptionServerNotification | undefined> {
     const store = new N3.Store();
     try {
+        await uma_fetcher.fetch(resource, { method: 'GET' });
         const token = token_manager.getAccessToken(resource);
         const headers: Record<string, string> = {};
         if (token?.token_type && token?.access_token) {
             headers['Authorization'] = `${token.token_type} ${token.access_token}`;
         }
 
-        const response = await axios.head(resource, { headers });
-        const link_header = response.headers['link'] as string | undefined;
+        const response = await fetch(resource, { method: 'HEAD', headers });
+        const link_header = response.headers.get('link') ?? undefined;
         if (!link_header) {
             return undefined;
         }
@@ -42,8 +45,12 @@ export async function extract_subscription_server(resource: string): Promise<Sub
         }
 
         const resolved_storage_description_link = new URL(storage_description_link, resource).toString();
-        const storage_description_response = await axios.get(resolved_storage_description_link, { headers });
-        await parser.parse(storage_description_response.data, (error: any, quad: any) => {
+        const storage_description_response = await fetch(resolved_storage_description_link, { headers });
+        if (!storage_description_response.ok) {
+            return undefined;
+        }
+        const storage_description_turtle = await storage_description_response.text();
+        await parser.parse(storage_description_turtle, (error: any, quad: any) => {
             if (error) {
                 throw error;
             }
@@ -109,7 +116,7 @@ export async function extract_ldp_inbox(ldes_stream_location: string) {
 
     const store = new N3.Store();
     try {
-        const response = await fetch(ldes_stream_location, {
+        const response = await uma_fetcher.fetch(ldes_stream_location, {
             headers: {}
         });
         if (response) {
@@ -145,18 +152,18 @@ export async function create_subscription(subscription_server: string, location:
             "topic": `${location}`,
             "sendTo": `${AGGREGATOR_SETUP.aggregator_http_server_url}`,
         };
-        const response = await fetch(subscription_server, {
+        const response = await uma_fetcher.fetch(subscription_server, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/ld+json',
             },
             body: JSON.stringify(subscription)
         });
-        if (response) {
+        if (response.ok) {
             return response.text();
         }
-        console.error("The response object is empty.");
-        throw new Error("The response object is empty.");
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(`Subscription request failed (${response.status}): ${errorBody}`);
     } catch (error) {
         console.warn(`Failed to create subscription at ${subscription_server} for ${location}. Continuing without server-side subscription.`, error);
         return '';

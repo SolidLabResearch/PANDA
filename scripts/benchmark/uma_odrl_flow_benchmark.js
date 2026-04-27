@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawnSync } = require('child_process');
+const { runDerivedPreflight } = require('../uma/preflight-derived');
 
 function nowMs() {
   return Number(process.hrtime.bigint()) / 1_000_000;
@@ -215,6 +216,7 @@ function runStrictPreflight(config) {
     PANDA_UMA_REQUIRE_UMA_CHALLENGE: 'true',
     PANDA_UMA_REQUIRE_401_CHALLENGE: 'true',
     PANDA_UMA_REQUIRE_DENY_PATH: 'true',
+    PANDA_UMA_REQUIRE_ODRL_PROOF: 'false',
     PANDA_UMA_DENY_CLAIM_TOKEN: env('PANDA_UMA_DENY_CLAIM_TOKEN', 'http://localhost:3000/demo/profile/card#me'),
     PANDA_UMA_WRONG_TARGET_RESOURCE: env('PANDA_UMA_WRONG_TARGET_RESOURCE', 'http://localhost:3000/alice/derived/acc-y/'),
   };
@@ -953,7 +955,11 @@ async function main() {
     throw new Error(`Token request file not found: ${config.tokenRequestFilePath}`);
   }
 
+  await runDerivedPreflight({ resourcePaths: ['alice/spo2/'] });
   runStrictPreflight(config);
+
+  // Strict derived-resource preflight: verify the SPO2 stream returns 401+UMA ticket,
+  // not 500, before any CSV is written.
 
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   await fs.promises.mkdir(outputDir, { recursive: true });

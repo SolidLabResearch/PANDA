@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { runDerivedPreflight } = require('../uma/preflight-derived');
 
 function env(name, fallback) {
   const value = process.env[name];
@@ -122,7 +123,7 @@ async function exchangeToken(tokenEndpoint, ticket, claimToken, claimTokenFormat
         uid: `urn:uuid:${crypto.randomUUID()}`,
         permission: [{
           '@type': 'Permission',
-          target: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/'),
+          target: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/spo2/'),
           action: { '@id': 'https://w3id.org/oac#read' },
           assigner: env('PANDA_UMA_POLICY_OWNER_WEBID', 'http://localhost:3000/alice/profile/card#me'),
           assignee: decodeURIComponent(claimToken),
@@ -486,14 +487,19 @@ async function runStrictPreflight(config) {
 }
 
 async function main() {
+  // Strict derived-resource preflight before any output directory is created.
+  // Fails immediately with an actionable message if any resource returns 500
+  // (indicating stale UMA registration from a CSS/UMA-AS restart).
+  await runDerivedPreflight({ resourcePaths: ['alice/spo2/'] });
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outputDir = path.join(process.cwd(), 'benchmark-results', timestamp);
   fs.mkdirSync(outputDir, { recursive: true });
 
   const config = {
-    resource: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/'),
-    derivedResource: env('PANDA_UMA_DERIVED_RESOURCE', env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/')),
-    wrongTargetResource: env('PANDA_UMA_WRONG_TARGET_RESOURCE', 'http://localhost:3000/alice/derived/acc-y/'),
+    resource: env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/spo2/'),
+    derivedResource: env('PANDA_UMA_DERIVED_RESOURCE', env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/spo2/')),
+    wrongTargetResource: env('PANDA_UMA_WRONG_TARGET_RESOURCE', 'http://localhost:3000/alice/'),
     allowClaim: env('PANDA_UMA_CLAIM_TOKEN', 'http://localhost:3000/bob/profile/card#me'),
     denyClaim: env('PANDA_UMA_DENY_CLAIM_TOKEN', 'http://localhost:3000/demo/profile/card#me'),
     claimTokenFormat: env('PANDA_UMA_CLAIM_TOKEN_FORMAT', 'urn:solidlab:uma:claims:formats:webid'),

@@ -112,7 +112,7 @@ export class UserManagedAccessFetcher {
         const content = {
             grant_type: this.grant_type,
             ticket,
-            claim_token: this.claim.token,
+            claim_token: encodeURIComponent(this.claim.token),
             claim_token_format: this.claim.token_format,
         }
 

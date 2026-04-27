@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { client: WebSocketClient } = require('websocket');
+const { runDerivedPreflight } = require('../uma/preflight-derived');
 
 function env(name, fallback = '') {
   const value = process.env[name];
@@ -426,6 +427,12 @@ async function main() {
   if (!logFile) {
     throw new Error('No PANDA log file found. Set PANDA_MONITOR_LOG_FILE to a live PANDA log path.');
   }
+
+  // Strict derived-resource preflight: fail before any measurement if UMA registration is stale.
+  // A 500 on the resource means CSS/UMA-AS was restarted without re-running setup-alice-derived.
+  await runDerivedPreflight({
+    resourcePaths: ['alice/spo2/'],
+  });
 
   const query = queryRaw || fs.readFileSync(queryFile, 'utf8');
   const rules = rulesRaw || (fs.existsSync(rulesFile) ? fs.readFileSync(rulesFile, 'utf8') : '');

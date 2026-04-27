@@ -26,7 +26,9 @@
         "lint:ts:fix": "npx eslint . --ext ts --report-unused-disable-directives --max-warnings 0 --fix",
         "lint:no-warning": "eslint . --ext ts --quiet --max-warnings 0",
         "benchmark:uma-odrl:strict": "node scripts/benchmark/run_strict_uma_odrl_replayer_benchmarks.js",
-        "uma:start:odrl:logged": "bash scripts/uma/start_odrl_logged.sh"
+        "uma:start:odrl:logged": "bash scripts/uma/start_odrl_logged.sh",
+        "uma:check-derived": "node scripts/uma/check-derived-registration.js",
+        "uma:preflight": "node scripts/uma/preflight-derived.js"
     },
     "keywords": [],
     "author": "Kushagra Singh Bisen",

@@ -200,6 +200,21 @@ function runScenario(outputDir, scenario) {
 }
 
 function runStrictPreflight(baseConfig) {
+  const derivedPreflight = spawnSync('node', ['scripts/uma/preflight-derived.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PANDA_CSS_BASE: env('PANDA_CSS_BASE', 'http://localhost:3000'),
+      PANDA_UMA_AS_BASE: env('PANDA_UMA_AS_BASE', 'http://localhost:4000/uma'),
+      PANDA_AGGREGATOR_BASE: env('PANDA_AGGREGATOR_BASE', 'http://localhost:8080'),
+    },
+    encoding: 'utf8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (derivedPreflight.status !== 0) {
+    throw new Error(`Derived-resource preflight failed: ${(derivedPreflight.stderr || derivedPreflight.stdout || '').trim()}`);
+  }
+
   const envVars = {
     ...process.env,
     PANDA_UMA_RESOURCE: baseConfig.resource,
@@ -271,9 +286,10 @@ function main() {
 
   const matrixId = nowId();
   const outputDir = env('MATRIX_OUTPUT_DIR', path.join(process.cwd(), 'benchmark-results', `uma-latency-matrix-${matrixId}`));
-  fs.mkdirSync(outputDir, { recursive: true });
 
   runStrictPreflight(baseConfig);
+
+  fs.mkdirSync(outputDir, { recursive: true });
 
   const scenarios = scenarioDefinitions(baseConfig);
   const results = scenarios.map((scenario) => runScenario(outputDir, scenario));

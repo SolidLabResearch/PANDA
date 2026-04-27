@@ -122,7 +122,7 @@ async function ensureSimpleAllowPolicy(resource, ownerWebId, assigneeWebId, poli
   const policy = `
 PREFIX odrl: <http://www.w3.org/ns/odrl/2/>
 PREFIX ex: <http://example.org/>
-ex:agreement a odrl:Agreement ; odrl:uid <${uid}> ; odrl:permission ex:permission .
+<${uid}> a odrl:Agreement ; odrl:uid <${uid}> ; odrl:permission ex:permission .
 ex:permission a odrl:Permission ;
   odrl:target <${resource}> ;
   odrl:assigner <${ownerWebId}> ;
