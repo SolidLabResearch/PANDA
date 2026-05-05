@@ -16,6 +16,21 @@ const uma_fetcher = new ReuseTokenUMAFetcher(getUmaClaim());
  */
 export async function extract_subscription_server(resource: string): Promise<SubscriptionServerNotification | undefined> {
     const store = new N3.Store();
+    const fallbackFromResource = (resourceUrl: string): SubscriptionServerNotification | undefined => {
+        try {
+            const origin = new URL(resourceUrl).origin;
+            const fallback = `${origin}/.notifications/WebhookChannel2023/`;
+            return {
+                location: fallback,
+                channelType: 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023',
+                channelLocation: fallback,
+            };
+        } catch (fallbackError) {
+            console.error(`Unable to derive fallback subscription server for ${resourceUrl}.`, fallbackError);
+            return undefined;
+        }
+    };
+
     try {
         await uma_fetcher.fetch(resource, { method: 'GET' });
         const token = token_manager.getAccessToken(resource);
@@ -27,7 +42,7 @@ export async function extract_subscription_server(resource: string): Promise<Sub
         const response = await fetch(resource, { method: 'HEAD', headers });
         const link_header = response.headers.get('link') ?? undefined;
         if (!link_header) {
-            return undefined;
+            return fallbackFromResource(resource);
         }
 
         const storage_rel = 'http://www.w3.org/ns/solid/terms#storageDescription';
@@ -41,13 +56,13 @@ export async function extract_subscription_server(resource: string): Promise<Sub
         }
 
         if (!storage_description_link) {
-            return undefined;
+            return fallbackFromResource(resource);
         }
 
         const resolved_storage_description_link = new URL(storage_description_link, resource).toString();
         const storage_description_response = await fetch(resolved_storage_description_link, { headers });
         if (!storage_description_response.ok) {
-            return undefined;
+            return fallbackFromResource(resource);
         }
         const storage_description_turtle = await storage_description_response.text();
         await parser.parse(storage_description_turtle, (error: any, quad: any) => {
@@ -66,7 +81,7 @@ export async function extract_subscription_server(resource: string): Promise<Sub
 
         const subscription_quads = store.getQuads(null, subscription_predicate, null);
         if (!subscription_quads || subscription_quads.length === 0) {
-            return undefined;
+            return fallbackFromResource(resource);
         }
 
         const resolvedChannels = subscription_quads.map((quad: any) => {
@@ -91,18 +106,7 @@ export async function extract_subscription_server(resource: string): Promise<Sub
         return subscription_response;
     } catch (error) {
         console.warn(`Failed to extract subscription server from ${resource}. Falling back to default webhook channel.`, error);
-        try {
-            const origin = new URL(resource).origin;
-            const fallback = `${origin}/.notifications/WebhookChannel2023/`;
-            return {
-                location: fallback,
-                channelType: 'http://www.w3.org/ns/solid/notifications#WebhookChannel2023',
-                channelLocation: fallback,
-            };
-        } catch (fallbackError) {
-            console.error(`Unable to derive fallback subscription server for ${resource}.`, fallbackError);
-            return undefined;
-        }
+        return fallbackFromResource(resource);
     }
 }
 

@@ -14,6 +14,15 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function assertReachable(url, label) {
+  try {
+    const response = await fetch(url, { method: 'GET' });
+    return { ok: true, status: response.status };
+  } catch (error) {
+    throw new Error(`${label} not reachable at ${url}: ${error.message}`);
+  }
+}
+
 function percentile(sortedValues, p) {
   if (sortedValues.length === 0) return NaN;
   const index = Math.ceil((p / 100) * sortedValues.length) - 1;
@@ -40,13 +49,67 @@ async function connectWebSocket(url) {
 }
 
 async function postText(url, body, contentType = 'text/turtle') {
+  return postTextWithHeaders(url, body, { 'Content-Type': contentType });
+}
+
+async function postTextWithHeaders(url, body, headers) {
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': contentType },
+    headers,
     body,
   });
   const text = await response.text().catch(() => '');
   return { response, body: text };
+}
+
+function parseAuthenticateHeader(header) {
+  if (!header || !/^UMA\s+/i.test(header)) {
+    throw new Error(`Expected UMA challenge, got: ${header || '<empty>'}`);
+  }
+  const params = Object.fromEntries(
+    header.replace(/^UMA\s+/i, '').split(/\s*,\s*/).map((part) => {
+      const idx = part.indexOf('=');
+      if (idx === -1) return [part.trim(), ''];
+      return [part.slice(0, idx).trim(), part.slice(idx + 1).trim().replace(/^"|"$/g, '')];
+    }),
+  );
+  if (!params.as_uri || !params.ticket) {
+    throw new Error(`Invalid UMA challenge: ${header}`);
+  }
+  const tokenEndpoint = new URL('token', params.as_uri.endsWith('/') ? params.as_uri : `${params.as_uri}/`).toString();
+  return { ticket: params.ticket, tokenEndpoint };
+}
+
+async function exchangeUmaToken(tokenEndpoint, ticket, claimToken, claimTokenFormat) {
+  const payload = {
+    grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
+    ticket,
+    // UMA "webid" format expects encodeURIComponent(webId)[:encodeURIComponent(clientId)].
+    claim_token: encodeURIComponent(claimToken),
+    claim_token_format: claimTokenFormat,
+  };
+  const response = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const raw = await response.text();
+  let json = null;
+  try { json = JSON.parse(raw); } catch {}
+  if (response.status !== 200 || !json?.access_token) {
+    throw new Error(`Token exchange failed (${response.status}): ${raw}`);
+  }
+  return { tokenType: json.token_type || 'Bearer', accessToken: json.access_token };
+}
+
+async function getUmaTokenForPost(url, claimToken, claimTokenFormat) {
+  const challengeResponse = await fetch(url, { method: 'POST' });
+  if (challengeResponse.status !== 401) {
+    const body = await challengeResponse.text().catch(() => '');
+    throw new Error(`Expected 401 UMA challenge for POST ${url}, got ${challengeResponse.status}: ${body}`);
+  }
+  const parsed = parseAuthenticateHeader(challengeResponse.headers.get('WWW-Authenticate') || '');
+  return exchangeUmaToken(parsed.tokenEndpoint, parsed.ticket, claimToken, claimTokenFormat);
 }
 
 function parseJsonSafe(text) {
@@ -196,6 +259,8 @@ async function main() {
   const interIterationDelayMs = Number(env('INTER_ITERATION_DELAY_MS', '250'));
   const outputDir = env('OUTPUT_DIR', path.join(process.cwd(), 'benchmark-results'));
   const outputPrefix = env('OUTPUT_PREFIX', 'webhook-latency');
+  const claimToken = env('CLAIM_TOKEN', 'http://localhost:3000/alice/profile/card#me');
+  const claimTokenFormat = env('CLAIM_TOKEN_FORMAT', 'urn:solidlab:uma:claims:formats:webid');
 
   if (!fs.existsSync(queryFile)) {
     throw new Error(`Missing QUERY_FILE: ${queryFile}`);
@@ -206,6 +271,19 @@ async function main() {
 
   const query = await readText(queryFile);
   const rules = rulesFile && fs.existsSync(rulesFile) ? await readText(rulesFile) : '';
+
+  console.log('[endpoint-preflight]');
+  console.log(JSON.stringify({
+    wsUrl,
+    replayPostUrl,
+    notificationChannelUrl,
+    notificationTopic,
+    notificationSendTo,
+  }, null, 2));
+
+  await assertReachable('http://localhost:8080/', 'PANDA aggregator');
+  await assertReachable('http://localhost:3000/', 'CSS');
+  const replayPostToken = await getUmaTokenForPost(replayPostUrl, claimToken, claimTokenFormat);
 
   await fs.promises.mkdir(outputDir, { recursive: true });
 
@@ -278,7 +356,10 @@ async function main() {
     pending.push({ resolve });
   });
   const sanityPostStart = Date.now();
-  const sanityWrite = await postText(replayPostUrl, sanityTurtle, 'text/turtle');
+  const sanityWrite = await postTextWithHeaders(replayPostUrl, sanityTurtle, {
+    'Content-Type': 'text/turtle',
+    Authorization: `${replayPostToken.tokenType} ${replayPostToken.accessToken}`,
+  });
   const sanityPostDone = Date.now();
   if (!(sanityWrite.response.status === 201 || sanityWrite.response.status === 200)) {
     throw new Error(`Sanity POST failed with ${sanityWrite.response.status}: ${sanityWrite.body}`);
@@ -321,7 +402,10 @@ async function main() {
       pending.push({ resolve });
     });
 
-    const { response, body } = await postText(replayPostUrl, memberTurtle, 'text/turtle');
+    const { response, body } = await postTextWithHeaders(replayPostUrl, memberTurtle, {
+      'Content-Type': 'text/turtle',
+      Authorization: `${replayPostToken.tokenType} ${replayPostToken.accessToken}`,
+    });
     const postDoneMs = Date.now();
 
     if (!(response.status === 201 || response.status === 200)) {

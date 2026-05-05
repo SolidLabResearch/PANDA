@@ -162,7 +162,7 @@ export class AggregatorInstantiator {
                             }
                             const aggregation_object: aggregation_object = {
                                 query_hash: this.hash_string,
-                                aggregation_event: reasoned_result,
+                                aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                                 aggregation_window_from: this.from_date,
                                 aggregation_window_to: this.to_date,
                             };
@@ -189,7 +189,7 @@ export class AggregatorInstantiator {
                         }
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
-                            aggregation_event: reasoned_result,
+                            aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                             aggregation_window_from: this.from_date,
                             aggregation_window_to: this.to_date,
                         };

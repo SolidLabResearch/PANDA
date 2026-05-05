@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const { spawn } = require('child_process');
 const { client: WebSocketClient } = require('websocket');
 const { runDerivedPreflight } = require('../uma/preflight-derived');
 
@@ -29,6 +30,29 @@ function normalizeTimestamp(value) {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHttp(url, timeoutMs = 30000, pollMs = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url);
+      if (res.status >= 100) return true;
+    } catch {}
+    await wait(pollMs);
+  }
+  throw new Error(`Timed out waiting for HTTP endpoint: ${url}`);
+}
+
+function startManagedPanda({ cwd, logFile, nodeBin }) {
+  const out = fs.openSync(logFile, 'a');
+  const err = fs.openSync(logFile, 'a');
+  const proc = spawn(nodeBin, [ '--max-old-space-size=8192', path.join(cwd, 'dist/index.js'), 'monitoring' ], {
+    cwd,
+    stdio: [ 'ignore', out, err ],
+    detached: false,
+  });
+  return proc;
 }
 
 function parseAuthenticateHeader(header) {
@@ -166,7 +190,7 @@ function startWsRegistration({ wsUrl, query, rules }) {
   });
 }
 
-async function postEvent(streamUrl, eventId, value, issuedIso) {
+async function postEvent(streamUrl, eventId, value, issuedIso, reusedToken) {
   if (!eventId) {
     throw new Error('Benchmark event is missing an identifier');
   }
@@ -178,9 +202,14 @@ async function postEvent(streamUrl, eventId, value, issuedIso) {
     + `<${eventId}> <https://saref.etsi.org/core/relatesToProperty> <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2> .\n`
     + `<${eventId}> <https://saref.etsi.org/core/hasTimestamp> "${timestamp}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n`;
 
+  const headers = { 'Content-Type': 'text/turtle' };
+  if (reusedToken?.accessToken) {
+    headers.Authorization = `${reusedToken.tokenType || 'Bearer'} ${reusedToken.accessToken}`;
+  }
+
   const response = await fetch(streamUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'text/turtle' },
+    headers,
     body: ttl,
   });
 
@@ -191,9 +220,16 @@ async function postEvent(streamUrl, eventId, value, issuedIso) {
 }
 
 async function exchangeToken(tokenEndpoint, ticket, claimToken, claimTokenFormat) {
+  console.log('[UMA][exchange]', JSON.stringify({
+    tokenEndpoint,
+    ticket,
+    claimTokenFormat,
+    claimTokenPreview: String(claimToken).slice(0, 120),
+  }));
   const payload = {
     grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
     ticket,
+    // UMA "webid" format expects encodeURIComponent(webId)[:encodeURIComponent(clientId)].
     claim_token: encodeURIComponent(claimToken),
     claim_token_format: claimTokenFormat,
   };
@@ -219,6 +255,24 @@ async function exchangeToken(tokenEndpoint, ticket, claimToken, claimTokenFormat
   return { tokenType: json.token_type || 'Bearer', accessToken: json.access_token };
 }
 
+async function getUmaTokenForRequest({ url, method, claimToken, claimTokenFormat }) {
+  console.log('[UMA][challenge-request]', JSON.stringify({ method, url }));
+  const challengeRes = await fetch(url, { method });
+  if (challengeRes.status !== 401) {
+    const body = await challengeRes.text().catch(() => '');
+    throw new Error(`expected 401 UMA challenge for ${method} ${url}, got ${challengeRes.status}: ${body}`);
+  }
+  const challengeHeader = challengeRes.headers.get('WWW-Authenticate') || '';
+  console.log('[UMA][challenge-response]', JSON.stringify({
+    method,
+    url,
+    status: challengeRes.status,
+    header: challengeHeader,
+  }));
+  const parsedChallenge = parseAuthenticateHeader(challengeHeader);
+  return exchangeToken(parsedChallenge.tokenEndpoint, parsedChallenge.ticket, claimToken, claimTokenFormat);
+}
+
 async function measureGrantPath({ resourceUrl, claimToken, claimTokenFormat }) {
   const stages = { t6: null, t7: null, t8: null, t9: null, t10: null, t11: null };
 
@@ -228,6 +282,11 @@ async function measureGrantPath({ resourceUrl, claimToken, claimTokenFormat }) {
 
   const challengeStatus = challengeRes.status;
   const challengeHeader = challengeRes.headers.get('WWW-Authenticate') || '';
+  console.log('[UMA][grant-challenge]', JSON.stringify({
+    resourceUrl,
+    status: challengeStatus,
+    header: challengeHeader,
+  }));
   if (challengeRes.status !== 401) {
     const body = await challengeRes.text().catch(() => '');
     throw new Error(`grant-path expected 401 challenge, got ${challengeRes.status}: ${body}`);
@@ -301,6 +360,7 @@ async function runIteration({
   pollMs,
   resourceUrl,
   reusedToken,
+  streamPostToken,
 }) {
   const stages = { t_fetch_start: null, t_fetch_end: null, t_parse_done: null, t1: null, t2: null, t3: null, t4: null, t5: null };
   const eventIdA = `${streamUrl.replace(/\/$/, '')}/${randomUUID()}`;
@@ -313,8 +373,8 @@ async function runIteration({
   const triggerMsB = tFetchStartMs + rangeMs + triggerDeltaMs;
   const timeoutMs = triggerMsB + waitBufferMs;
 
-  await postEvent(streamUrl, eventIdA, eventValueA, stages.t_fetch_start);
-  await postEvent(streamUrl, eventIdB, eventValueB, new Date(triggerMsB).toISOString());
+  await postEvent(streamUrl, eventIdA, eventValueA, stages.t_fetch_start, streamPostToken);
+  await postEvent(streamUrl, eventIdB, eventValueB, new Date(triggerMsB).toISOString(), streamPostToken);
 
   const authHeader = `${reusedToken.tokenType} ${reusedToken.accessToken}`;
   const fetchResponse = await fetch(resourceUrl, { headers: { Authorization: authHeader } });
@@ -414,7 +474,7 @@ async function main() {
   const wsUrl = env('PANDA_WS_URL', 'ws://localhost:8080/');
   const claimToken = env('PANDA_UMA_CLAIM_TOKEN', 'http://localhost:3000/bob/profile/card#me');
   const claimTokenFormat = env('PANDA_UMA_CLAIM_TOKEN_FORMAT', 'urn:solidlab:uma:claims:formats:webid');
-  const resourceUrl = env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/acc-x/');
+  const resourceUrl = env('PANDA_UMA_RESOURCE', 'http://localhost:3000/alice/derived/latest');
   const logFile = env('PANDA_MONITOR_LOG_FILE', findLatestPandaLog(cwd));
   const waitBufferMs = Number(env('PANDA_WINDOW_TIMEOUT_BUFFER_MS', '10000'));
   const pollMs = Number(env('PANDA_LOG_POLL_MS', '250'));
@@ -423,16 +483,28 @@ async function main() {
   const eventValueA = env('PANDA_EVENT_VALUE_A', '81');
   const eventValueB = env('PANDA_EVENT_VALUE_B', '95');
   const skipWsRegister = ['1', 'true', 'yes', 'on'].includes(env('PANDA_SKIP_WS_REGISTER', '0').toLowerCase());
+  const autoStartPanda = ['1', 'true', 'yes', 'on'].includes(env('PANDA_AUTO_START_MONITORING', '0').toLowerCase());
+  const pandaNodeBin = env('PANDA_NODE_BIN', process.execPath);
+  const pandaHealthUrl = env('PANDA_HEALTH_URL', 'http://localhost:8080/');
+  let managedPanda = null;
 
   if (!logFile) {
     throw new Error('No PANDA log file found. Set PANDA_MONITOR_LOG_FILE to a live PANDA log path.');
   }
 
-  // Strict derived-resource preflight: fail before any measurement if UMA registration is stale.
-  // A 500 on the resource means CSS/UMA-AS was restarted without re-running setup-alice-derived.
-  await runDerivedPreflight({
-    resourcePaths: ['alice/spo2/'],
-  });
+  try {
+    if (autoStartPanda) {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, '');
+      managedPanda = startManagedPanda({ cwd, logFile, nodeBin: pandaNodeBin });
+      await waitForHttp(pandaHealthUrl, Number(env('PANDA_MONITOR_START_TIMEOUT_MS', '45000')));
+    }
+
+    // Strict derived-resource preflight: fail before any measurement if UMA registration is stale.
+    // A 500 on the resource means CSS/UMA-AS was restarted without re-running setup-alice-derived.
+    await runDerivedPreflight({
+      resourcePaths: ['alice/spo2/'],
+    });
 
   const query = queryRaw || fs.readFileSync(queryFile, 'utf8');
   const rules = rulesRaw || (fs.existsSync(rulesFile) ? fs.readFileSync(rulesFile, 'utf8') : '');
@@ -440,6 +512,12 @@ async function main() {
   const streamUrl = parseStreamFromQuery(query);
   const grantPathCold = await measureGrantPath({ resourceUrl, claimToken, claimTokenFormat });
   const grantPathWarm = await measureGrantPath({ resourceUrl, claimToken, claimTokenFormat });
+  const streamPostToken = await getUmaTokenForRequest({
+    url: streamUrl,
+    method: 'POST',
+    claimToken,
+    claimTokenFormat,
+  });
 
   const ws = skipWsRegister ? null : await startWsRegistration({ wsUrl, query, rules });
   await wait(Number(env('PANDA_POST_REGISTER_WAIT_MS', '1000')));
@@ -460,6 +538,7 @@ async function main() {
       pollMs,
       resourceUrl,
       reusedToken: grantPathWarm.token,
+      streamPostToken,
     });
     logCursor = row.next_log_cursor;
     delete row.next_log_cursor;
@@ -568,7 +647,12 @@ async function main() {
   console.log(`| rule_share_of_pipeline | ${fmtMs(ratio.rule_share_of_pipeline.avg)} | ${fmtMs(ratio.rule_share_of_pipeline.median)} | ${fmtMs(ratio.rule_share_of_pipeline.p95)} |`);
   console.log(`| rule_to_total | ${fmtMs(ratio.rule_to_total.avg)} | ${fmtMs(ratio.rule_to_total.median)} | ${fmtMs(ratio.rule_to_total.p95)} |`);
 
-  console.log(JSON.stringify(output, null, 2));
+    console.log(JSON.stringify(output, null, 2));
+  } finally {
+    if (managedPanda && !managedPanda.killed) {
+      managedPanda.kill('SIGTERM');
+    }
+  }
 }
 
 main().catch((error) => {

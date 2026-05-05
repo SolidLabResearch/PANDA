@@ -3,13 +3,24 @@ function normalizeTopic(urlLike: string): string | undefined {
         const normalized = new URL(urlLike);
         normalized.hash = '';
         normalized.search = '';
-        if (!normalized.pathname.endsWith('/')) {
-            normalized.pathname = normalized.pathname.replace(/[^/]*$/, '');
-            if (!normalized.pathname.endsWith('/')) {
-                normalized.pathname += '/';
-            }
-        }
         return normalized.toString();
+    } catch {
+        return undefined;
+    }
+}
+
+function inferDerivedLatestTopicFromTarget(target: string): string | undefined {
+    try {
+        const parsed = new URL(target);
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        if (segments.length === 0) {
+            return undefined;
+        }
+        const podOwner = segments[0];
+        parsed.hash = '';
+        parsed.search = '';
+        parsed.pathname = `/${podOwner}/derived/latest`;
+        return parsed.toString();
     } catch {
         return undefined;
     }
@@ -17,21 +28,20 @@ function normalizeTopic(urlLike: string): string | undefined {
 
 export function resolveNotificationTopic(webhook_notification_data: any, target?: string): string | undefined {
     if (typeof webhook_notification_data?.topic === 'string' && webhook_notification_data.topic.length > 0) {
-        return normalizeTopic(webhook_notification_data.topic) ?? webhook_notification_data.topic;
+        const explicitTopic = normalizeTopic(webhook_notification_data.topic) ?? webhook_notification_data.topic;
+        // For source-stream notifications, always consume through the derived/latest endpoint.
+        const inferredFromTopic = inferDerivedLatestTopicFromTarget(explicitTopic);
+        if (inferredFromTopic) {
+            return inferredFromTopic;
+        }
+        return explicitTopic;
     }
-    if (typeof webhook_notification_data?.object === 'string' && webhook_notification_data.object.length > 0) {
-        return normalizeTopic(webhook_notification_data.object) ?? webhook_notification_data.object;
-    }
-    if (!target) {
+    const fallbackSource = typeof webhook_notification_data?.object === 'string' && webhook_notification_data.object.length > 0
+        ? webhook_notification_data.object
+        : target;
+    if (!fallbackSource) {
         return undefined;
     }
 
-    const normalized = new URL(target);
-    normalized.hash = '';
-    normalized.search = '';
-    normalized.pathname = normalized.pathname.replace(/[^/]*\/?$/, '');
-    if (!normalized.pathname.endsWith('/')) {
-        normalized.pathname += '/';
-    }
-    return normalized.toString();
+    return inferDerivedLatestTopicFromTarget(fallbackSource);
 }

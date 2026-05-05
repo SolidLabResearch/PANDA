@@ -82,16 +82,15 @@ export class HTTPServer {
                     if (webhook_notification_data.type === 'Add') {
                         this.logger.info({}, 'webhook_notification_received');
                         const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
-                        const objectTarget = typeof webhook_notification_data.object === 'string' ? webhook_notification_data.object : undefined;
-                        const fetchTarget = objectTarget ?? target;
-                        const topic = resolveNotificationTopic(webhook_notification_data, fetchTarget ?? target);
+                        const topic = resolveNotificationTopic(webhook_notification_data, target);
+                        const fetchTarget = topic;
 
                         if (!fetchTarget || !topic) {
                             this.logger.error({}, 'webhook_notification_missing_target_or_topic');
                             return;
                         }
 
-                        const latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
+                        let latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
                             method: 'GET',
                             headers: {
                                 'Accept': 'text/turtle'
@@ -104,7 +103,7 @@ export class HTTPServer {
                             this.event_emitter.emit(topic, latest_event);
                             this.logger.info({}, 'webhook_notification_processed_and_emitted');
                         } else {
-                            console.error(`Failed to fetch notified resource ${target}. Status: ${latest_event_response.status}`);
+                            console.error(`Failed to fetch notified resource ${fetchTarget}. Status: ${latest_event_response.status}`);
                         }
                     }
                 });

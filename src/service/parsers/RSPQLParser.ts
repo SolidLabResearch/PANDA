@@ -22,47 +22,44 @@ export class RSPQLParser {
      */
     parse(rspql_query: string): ParsedQuery {
         const parsed = new ParsedQuery();
-        const split = rspql_query.split(/\r?\n/);
-        const sparqlLines = new Array<string>();
         const prefixMapper = new Map<string, string>();
-        split.forEach((line) => {
-            const trimmed_line = line.trim();
-            if (trimmed_line.startsWith("REGISTER")) {
-                const regexp = /REGISTER +([^ ]+) +<([^>]+)> AS/g;
-                const matches = trimmed_line.matchAll(regexp);
-                for (const match of matches) {
-                    if (match[1] === "RStream" || match[1] === "DStream" || match[1] === "IStream") {
-                        parsed.set_r2s({ operator: match[1], name: match[2] });
-                    }
-                }
+        const normalized = rspql_query.replace(/\r\n?/g, "\n");
+
+        const prefixRegexp = /PREFIX +([^:\s]*): +<([^>]+)>/gi;
+        for (const match of normalized.matchAll(prefixRegexp)) {
+            prefixMapper.set(match[1], match[2]);
+        }
+
+        const registerRegexp = /REGISTER +([^ ]+) +<([^>]+)> +AS/gi;
+        for (const match of normalized.matchAll(registerRegexp)) {
+            if (match[1] === "RStream" || match[1] === "DStream" || match[1] === "IStream") {
+                parsed.set_r2s({ operator: match[1], name: match[2] });
             }
-            else if (trimmed_line.startsWith("FROM NAMED WINDOW")) {
-                const regexp = /FROM +NAMED +WINDOW +([^ ]+) +ON +STREAM +([^ ]+) +\[RANGE +([^ ]+) +STEP +([^ ]+)\]/g;
-                const matches = trimmed_line.matchAll(regexp);
-                for (const match of matches) {
-                    parsed.add_s2r({
-                        window_name: this.unwrap(match[1], prefixMapper),
-                        stream_name: this.unwrap(match[2], prefixMapper),
-                        width: Number(match[3]),
-                        slide: Number(match[4])
-                    });
-                }
-            } else {
-                let sparqlLine = trimmed_line;
-                if (sparqlLine.startsWith("WINDOW")) {
-                    sparqlLine = sparqlLine.replace("WINDOW", "GRAPH");
-                }
-                if (sparqlLine.startsWith("PREFIX")) {
-                    const regexp = /PREFIX +([^:]*): +<([^>]+)>/g;
-                    const matches = trimmed_line.matchAll(regexp);
-                    for (const match of matches) {
-                        prefixMapper.set(match[1], match[2]);
-                    }
-                }
-                sparqlLines.push(sparqlLine);
-            }
-        });
-        parsed.sparql = sparqlLines.join("\n");
+        }
+
+        const fromWindowRegexp = /FROM +NAMED +WINDOW +([^ \n]+) +ON +STREAM +([^ \n]+) +\[RANGE +([^ \]\n]+) +STEP +([^ \]\n]+)\]/gi;
+        for (const match of normalized.matchAll(fromWindowRegexp)) {
+            parsed.add_s2r({
+                window_name: this.unwrap(match[1], prefixMapper),
+                stream_name: this.unwrap(match[2], prefixMapper),
+                width: Number(match[3]),
+                slide: Number(match[4]),
+            });
+        }
+
+        let sparqlQuery = normalized
+            .replace(registerRegexp, " ")
+            .replace(fromWindowRegexp, " ")
+            .replace(/\bWINDOW\b/gi, "GRAPH")
+            .replace(/\)\s*WHERE\b/gi, ") WHERE")
+            .replace(/\s+\n/g, "\n")
+            .trim();
+
+        if (sparqlQuery.length === 0) {
+            sparqlQuery = "SELECT * WHERE { ?s ?p ?o }";
+        }
+
+        parsed.sparql = sparqlQuery;
         this.parse_sparql_query(parsed.sparql, parsed);
         return parsed;
     }
@@ -170,5 +167,4 @@ type R2S = {
     operator: "RStream" | "IStream" | "DStream",
     name: string
 }
-
 

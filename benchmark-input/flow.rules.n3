@@ -1,0 +1,5 @@
+@prefix saref: <https://saref.etsi.org/core/> .
+@prefix math: <http://www.w3.org/2000/10/swap/math#> .
+@prefix ex: <http://example.org/> .
+
+{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert "SPO2_LOW". }.

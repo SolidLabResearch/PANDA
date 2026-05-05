@@ -369,8 +369,8 @@ export class WebSocketHandler {
         const derivedResources: string[] = containers_to_publish.map(url => {
             const trimmed = url.endsWith('/') ? url.slice(0, -1) : url;
             const parts = trimmed.split('/');
-            const lastSegment = parts.pop();
-            parts.push('derived', lastSegment!);
+            parts.pop();
+            parts.push('derived', 'latest');
             return parts.join('/');
         });
 

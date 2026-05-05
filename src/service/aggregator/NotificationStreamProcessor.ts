@@ -114,7 +114,7 @@ export class NotificationStreamProcessor {
         const has_value_predicate = "https://saref.etsi.org/core/hasValue";
         const relates_to_property_predicate = "https://saref.etsi.org/core/relatesToProperty";
         const expected_property_iri = process.env.PANDA_EXPECTED_PROPERTY_IRI;
-        event_emitter.on(`${this.ldes_stream}`, async (latest_event: string) => {
+        const eventHandler = async (latest_event: string) => {
             this.auditContext?.onDataAccess?.(this.ldes_stream);
             this.logger.info({}, 'latest_event_received_preprocessing_started');
             const processing_started_epoch = Date.now();
@@ -180,7 +180,11 @@ export class NotificationStreamProcessor {
             } else {
                 console.log(`[VALIDATION][INGEST] skip_stream_add reason=stream_name_undefined event_id=${eventId}`);
             }
-        });
+        };
+
+        for (const topic of this.getEventTopics()) {
+            event_emitter.on(topic, eventHandler);
+        }
     }
 
     /**
@@ -199,6 +203,35 @@ export class NotificationStreamProcessor {
                 stream.add(quad, timestamp)
             }
         });
+    }
+
+    private getEventTopics(): string[] {
+        const topics = new Set<string>();
+        topics.add(this.ldes_stream);
+
+        const derivedLatestTopic = this.inferDerivedLatestTopic(this.ldes_stream);
+        if (derivedLatestTopic) {
+            topics.add(derivedLatestTopic);
+        }
+
+        return Array.from(topics);
+    }
+
+    private inferDerivedLatestTopic(streamUrl: string): string | undefined {
+        try {
+            const parsed = new URL(streamUrl);
+            const segments = parsed.pathname.split('/').filter(Boolean);
+            if (segments.length === 0) {
+                return undefined;
+            }
+
+            parsed.hash = '';
+            parsed.search = '';
+            parsed.pathname = `/${segments[0]}/derived/latest`;
+            return parsed.toString();
+        } catch {
+            return undefined;
+        }
     }
 }
 

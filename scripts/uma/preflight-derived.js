@@ -11,6 +11,7 @@
  *   2. UMA AS reachable and returning valid discovery document
  *   3. PANDA aggregator reachable
  *   4. Each configured protected resource returns 401 + UMA ticket (not 500)
+ *   5. Derived latest resource is readable with an exchanged UMA token
  *
  * Fails immediately with an actionable message if any check fails.
  *
@@ -25,7 +26,8 @@
  *   PANDA_CSS_BASE           CSS server base URL (default http://localhost:3000)
  *   PANDA_UMA_AS_BASE        UMA AS base URL (default http://localhost:4000/uma)
  *   PANDA_AGGREGATOR_BASE    PANDA aggregator base URL (default http://localhost:8080)
- *   PANDA_PREFLIGHT_RESOURCES Comma-separated paths to check (default alice/spo2/)
+ *   PANDA_PREFLIGHT_RESOURCES Comma-separated paths to check (default alice/spo2/,alice/derived/latest)
+ *   PANDA_PREFLIGHT_DERIVED_READ_PATH Path to derived resource that must be readable after token exchange
  *   PANDA_SKIP_AGGREGATOR_CHECK Set to 1 to skip PANDA aggregator check
  */
 
@@ -202,6 +204,126 @@ async function checkProtectedResource(cssBase, resourcePath) {
   };
 }
 
+async function exchangeTicketForToken(asBase, ticket, claimWebId) {
+  const response = await fetch(`${asBase}/token`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
+      ticket,
+      claim_token: encodeURIComponent(claimWebId),
+      claim_token_format: 'urn:solidlab:uma:claims:formats:webid',
+    }),
+  });
+
+  if (response.status !== 200) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Token exchange failed with ${response.status}. Body: ${body.slice(0, 200)}`);
+  }
+
+  const tokenBody = await response.json().catch(() => null);
+  const accessToken = tokenBody?.access_token;
+  if (!accessToken) {
+    throw new Error('Token exchange succeeded but response does not include access_token.');
+  }
+
+  return accessToken;
+}
+
+async function checkDerivedReadable(cssBase, asBase, derivedReadPath, claimWebId) {
+  const label = `Derived readability for ${derivedReadPath}`;
+  const url = `${cssBase}/${derivedReadPath}`;
+
+  let challengeResponse;
+  try {
+    challengeResponse = await fetch(url);
+  } catch (err) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: `Network error fetching ${url}: ${err.message}`,
+    };
+  }
+
+  const challengeHeader = challengeResponse.headers.get('WWW-Authenticate') || '';
+  const challenge = parseUmaChallenge(challengeHeader);
+  if (challengeResponse.status !== 401 || !challenge?.ticket) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: `Expected 401 + UMA challenge before token exchange at ${url}. Got ${challengeResponse.status}.`,
+    };
+  }
+
+  let accessToken;
+  try {
+    accessToken = await exchangeTicketForToken(asBase, challenge.ticket, claimWebId);
+  } catch (err) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: `Failed to exchange ticket for ${url}: ${err.message}`,
+    };
+  }
+
+  let authorizedResponse;
+  try {
+    authorizedResponse = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch (err) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: `Network error on authorized GET ${url}: ${err.message}`,
+    };
+  }
+
+  if (authorizedResponse.status === 404) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: [
+        `Authorized GET returned 404 at ${url}.`,
+        'UMA protection is active, but the derived resource is not materialized/readable.',
+        'Ensure derived setup script has been run and at least one matching source event exists.',
+        SETUP_HINT,
+      ].join('\n'),
+    };
+  }
+
+  if (!authorizedResponse.ok) {
+    return {
+      label,
+      path: derivedReadPath,
+      ok: false,
+      fatal: true,
+      detail: `Authorized GET failed at ${url} with status ${authorizedResponse.status}.`,
+    };
+  }
+
+  return {
+    label,
+    path: derivedReadPath,
+    ok: true,
+    detail: `authorized_status=${authorizedResponse.status}`,
+  };
+}
+
 /**
  * Run all preflight checks. Throws on any failure.
  *
@@ -220,11 +342,13 @@ async function runDerivedPreflight(opts = {}) {
   const skipPanda = opts.skipPandaCheck ||
     ['1', 'true', 'yes', 'on'].includes(env('PANDA_SKIP_AGGREGATOR_CHECK', '0').toLowerCase());
 
-  const defaultPaths = 'alice/spo2/';
+  const defaultPaths = 'alice/spo2/,alice/derived/latest';
   const rawPaths = opts.resourcePaths
     ? opts.resourcePaths.join(',')
     : env('PANDA_PREFLIGHT_RESOURCES', defaultPaths);
   const resourcePaths = rawPaths.split(',').map((p) => p.trim()).filter(Boolean);
+  const derivedReadPath = env('PANDA_PREFLIGHT_DERIVED_READ_PATH', 'alice/derived/latest');
+  const claimWebId = env('PANDA_PREFLIGHT_CLAIM_WEBID', 'http://localhost:3000/bob/profile/card#me');
 
   const checks = [];
 
@@ -238,6 +362,8 @@ async function runDerivedPreflight(opts = {}) {
   for (const resourcePath of resourcePaths) {
     checks.push(await checkProtectedResource(cssBase, resourcePath));
   }
+
+  checks.push(await checkDerivedReadable(cssBase, asBase, derivedReadPath, claimWebId));
 
   const failures = checks.filter((c) => !c.ok);
   const staleRegistrations = checks.filter((c) => c.isStaleRegistration);
@@ -275,7 +401,7 @@ if (require.main === module) {
   const cssBase = env('PANDA_CSS_BASE', 'http://localhost:3000');
   const asBase = env('PANDA_UMA_AS_BASE', 'http://localhost:4000/uma');
   const pandaBase = env('PANDA_AGGREGATOR_BASE', 'http://localhost:8080');
-  const resourcesRaw = env('PANDA_PREFLIGHT_RESOURCES', 'alice/spo2/');
+  const resourcesRaw = env('PANDA_PREFLIGHT_RESOURCES', 'alice/spo2/,alice/derived/latest');
   const resourcePaths = resourcesRaw.split(',').map((p) => p.trim()).filter(Boolean);
 
   console.log('[preflight-derived] Running strict derived-resource preflight...');

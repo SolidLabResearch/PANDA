@@ -8,6 +8,10 @@ UMA_DIR="${PANDA_UMA_REPO_DIR:-$WORKSPACE_DIR/user-managed-access}"
 LOG_ROOT="${PANDA_UMA_LOG_DIR:-$PANDA_DIR/benchmark-results/uma-live-logs}"
 WAIT_SECONDS="${PANDA_UMA_START_WAIT_SECONDS:-120}"
 SEED_DERIVED="${PANDA_UMA_SEED_DERIVED:-true}"
+CLEAR_STATE="${PANDA_UMA_CLEAR_STATE:-true}"
+CSS_STATE_REL="${PANDA_UMA_CSS_STATE_DIR_REL:-packages/css/tmp-file-backed}"
+UMA_STATE_REL="${PANDA_UMA_UMA_STATE_DIR_REL:-packages/uma/tmp-file-backed}"
+USE_PAT_INIT="${PANDA_UMA_USE_PAT_INIT:-false}"
 MODE="${1:---foreground}"
 
 if [[ ! -d "$UMA_DIR" ]]; then
@@ -21,7 +25,13 @@ LOG_FILE="$LOG_ROOT/uma-odrl-$TIMESTAMP.log"
 LATEST_LINK="$LOG_ROOT/latest.log"
 ENV_FILE="$LOG_ROOT/latest-odrl-log.env"
 PID_FILE="$LOG_ROOT/latest.pid"
-START_CMD='corepack yarn start:odrl'
+CSS_STATE_PATH="$UMA_DIR/$CSS_STATE_REL"
+UMA_STATE_PATH="$UMA_DIR/$UMA_STATE_REL"
+if [[ "$USE_PAT_INIT" == "true" ]]; then
+  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json ./config/init-pat.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
+else
+  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
+fi
 
 ln -sfn "$LOG_FILE" "$LATEST_LINK"
 printf 'export PANDA_UMA_ODRL_LOG_FILE="%s"\n' "$LOG_FILE" > "$ENV_FILE"
@@ -47,15 +57,23 @@ wait_for_stack() {
   return 1
 }
 
-echo "[uma:start:logged] Clearing previous state ($UMA_DIR/packages/css/tmp-file-backed)..."
-rm -rf "$UMA_DIR/packages/css/tmp-file-backed"
-rm -rf "$UMA_DIR/packages/uma/tmp-file-backed"
+mkdir -p "$(dirname "$CSS_STATE_PATH")"
+mkdir -p "$(dirname "$UMA_STATE_PATH")"
+if [[ "$CLEAR_STATE" == "true" ]]; then
+  echo "[uma:start:logged] Clearing previous state ($CSS_STATE_PATH, $UMA_STATE_PATH)..."
+  rm -rf "$CSS_STATE_PATH"
+  rm -rf "$UMA_STATE_PATH"
+fi
+mkdir -p "$CSS_STATE_PATH"
+mkdir -p "$UMA_STATE_PATH"
 
 if [[ "$MODE" == "--foreground" ]]; then
   {
     echo "[uma:start:logged] $(date -u +%Y-%m-%dT%H:%M:%SZ) Starting UMA in foreground"
     echo "[uma:start:logged] repo=$UMA_DIR"
     echo "[uma:start:logged] log=$LOG_FILE"
+    echo "[uma:start:logged] css_state=$CSS_STATE_PATH"
+    echo "[uma:start:logged] uma_state=$UMA_STATE_PATH"
     echo "[uma:start:logged] PANDA_UMA_ODRL_LOG_FILE=$LOG_FILE"
   } | tee -a "$LOG_FILE"
   cd "$UMA_DIR"
@@ -66,6 +84,8 @@ fi
   echo "[uma:start:logged] $(date -u +%Y-%m-%dT%H:%M:%SZ) Starting UMA in detached mode"
   echo "[uma:start:logged] repo=$UMA_DIR"
   echo "[uma:start:logged] log=$LOG_FILE"
+  echo "[uma:start:logged] css_state=$CSS_STATE_PATH"
+  echo "[uma:start:logged] uma_state=$UMA_STATE_PATH"
 } >> "$LOG_FILE"
 
 cd "$UMA_DIR"
@@ -85,9 +105,9 @@ fi
 if [[ "$SEED_DERIVED" == "true" ]]; then
   # Re-create the derived resources that the missing script:setup-alice-derived would have created
   echo "[uma:start:logged] Seeding derived resources (alice/spo2/, alice/derived/)..." >> "$LOG_FILE"
-  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/spo2"
-  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/derived/acc-x"
-  mkdir -p "$UMA_DIR/packages/css/tmp-file-backed/alice/derived/acc-y"
+  mkdir -p "$CSS_STATE_PATH/alice/spo2"
+  mkdir -p "$CSS_STATE_PATH/alice/derived/acc-x"
+  mkdir -p "$CSS_STATE_PATH/alice/derived/acc-y"
   
   if corepack yarn run script:seed >> "$LOG_FILE" 2>&1; then
     echo "[uma:start:logged] Derived policies seeded via script:seed" >> "$LOG_FILE"

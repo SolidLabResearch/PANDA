@@ -164,7 +164,12 @@ export class AuditLoggedQueryService {
         const query_id = randomUUID();
         const query_hash = this.compute_query_hash(input.rspql_query);
 
-        const shouldReuse = actorAndScopeMatch !== undefined && (actorAndScopeMatch.status === 'executing' || actorAndScopeMatch.status === 'executed');
+        // Live queries should always start a fresh execution so webhook subscriptions
+        // are re-established in the current process.
+        const isLiveQuery = input.query_type === 'live';
+        const shouldReuse = !isLiveQuery
+            && actorAndScopeMatch !== undefined
+            && (actorAndScopeMatch.status === 'executing' || actorAndScopeMatch.status === 'executed');
         const reuse_decision = shouldReuse
             ? 'reused_existing'
             : (similarQueries.length > 0 ? 'not_reused_actor_scope_mismatch' : 'executed_new');
