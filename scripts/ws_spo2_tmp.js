@@ -5,7 +5,7 @@ const query = `
 PREFIX saref: <https://saref.etsi.org/core/>
 PREFIX : <https://rsp.js/>
 REGISTER RStream <output> AS
-SELECT ((?o) AS ?avg)
+SELECT (AVG(?o) AS ?avg)
 FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE 60000 STEP 30000]
 WHERE {
   WINDOW :w1 {

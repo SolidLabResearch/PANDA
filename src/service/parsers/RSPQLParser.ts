@@ -97,11 +97,20 @@ export class RSPQLParser {
         Object.keys(prefixes).forEach((key) => {
             parsed.prefixes.set(key, prefixes[key]);
         });
-        for (let i = 0; i <= parsed_sparql_query.variables.length; i++) {
-            if (parsed_sparql_query.variables[i] !== undefined) {
-                
-//                parsed.projection_variables.push(parsed_sparql_query.variables[i].variable.value);
-             //    parsed.aggregation_function = parsed_sparql_query.variables[i].expression.aggregation;
+        for (const variable of parsed_sparql_query.variables ?? []) {
+            if (typeof variable === 'string') {
+                parsed.projection_variables.push(variable);
+                continue;
+            }
+
+            const alias = variable.variable?.value;
+            if (alias) {
+                parsed.projection_variables.push(alias);
+            }
+
+            const aggregation = variable.expression?.aggregation;
+            if (typeof aggregation === 'string' && aggregation.length > 0) {
+                parsed.aggregation_function = aggregation;
             }
         }
     }
@@ -167,4 +176,3 @@ type R2S = {
     operator: "RStream" | "IStream" | "DStream",
     name: string
 }
-

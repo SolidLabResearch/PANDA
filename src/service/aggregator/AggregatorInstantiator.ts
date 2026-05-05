@@ -42,6 +42,9 @@ export class AggregatorInstantiator {
     private alertContainerInitialized = false;
     private fallbackAlertWriteAuthorizationHeader: string | null = null;
     private readonly auditContext?: QueryExecutionAuditContext;
+    private readonly projectedVariables: string[];
+    private readonly aggregationFunction: string;
+    private readonly windowWidthMs: number;
     /**
      * Creates an instance of AggregatorInstantiator.
      * @param {string} query - The RSPQL query.
@@ -65,7 +68,11 @@ export class AggregatorInstantiator {
         this.to_date = new Date(to_timestamp);
         this.stream_array = [];
         this.connection = websocketConnection;
-        parser.parse(this.query).s2r.forEach((stream) => {
+        const parsedQuery = parser.parse(this.query);
+        this.projectedVariables = parsedQuery.projection_variables;
+        this.aggregationFunction = parsedQuery.aggregation_function;
+        this.windowWidthMs = parsedQuery.s2r[0]?.width ?? 0;
+        parsedQuery.s2r.forEach((stream) => {
             this.stream_array.push(stream.stream_name);
         });
         this.rsp_emitter = this.rsp_engine.register();
@@ -122,19 +129,25 @@ export class AggregatorInstantiator {
         this.client.on('connect', (connection: typeof websocketConnection) => {
             console.log(`The connection with the server has been established. ${connection.connected}`);
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
-                const window_timestamp_from = object.timestamp_from;
-                const window_timestamp_to = object.timestamp_to;
                 const evaluation_now = Date.now();
+                const normalizedWindow = this.normalizeWindowTimestamps(
+                    object.timestamp_from,
+                    object.timestamp_to,
+                    evaluation_now
+                );
+                const window_timestamp_from = normalizedWindow.from;
+                const window_timestamp_to = normalizedWindow.to;
                 console.log(`[VALIDATION][RSP] evaluation_tick processing_time_epoch=${evaluation_now} processing_time_iso=${new Date(evaluation_now).toISOString()} window_start_epoch=${window_timestamp_from} window_start_iso=${new Date(window_timestamp_from).toISOString()} window_end_epoch=${window_timestamp_to} window_end_iso=${new Date(window_timestamp_to).toISOString()}`);
                 this.debugBindingRowShape(object.bindings);
-                const bindingRows = this.extractBindingRows(object.bindings);
+                const extractedBindingRows = this.extractBindingRows(object.bindings);
+                const bindingRows = this.reduceBindingRowsForEvaluation(extractedBindingRows);
                 console.log(`[VALIDATION][RSP] binding_count=${object.bindings.size}`);
                 console.log(`[VALIDATION][RSP] emitted_row_count=${bindingRows.length}`);
                 for (const [rowIndex, bindingRow] of bindingRows.entries()) {
                     console.log(`[VALIDATION][RSP] query_row_received row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
                     this.debugBindingRowVariables(bindingRow, rowIndex);
                     const sourceEventUri = bindingRow['?s'] ?? bindingRow['s'] ?? this.findUriLikeValue(bindingRow);
-                    const spo2Raw = bindingRow['?spo2Value'] ?? bindingRow['spo2Value'] ?? this.findNumericValue(bindingRow);
+                    const spo2Raw = this.resolveProjectedNumericValue(bindingRow);
                     const numericSpo2 = Number(spo2Raw);
                     if (!Number.isFinite(numericSpo2)) {
                         console.log(`[VALIDATION][RSP] skipped_non_numeric row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
@@ -163,8 +176,8 @@ export class AggregatorInstantiator {
                             const aggregation_object: aggregation_object = {
                                 query_hash: this.hash_string,
                                 aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
-                                aggregation_window_from: this.from_date,
-                                aggregation_window_to: this.to_date,
+                                aggregation_window_from: new Date(window_timestamp_from),
+                                aggregation_window_to: new Date(window_timestamp_to),
                             };
                             const aggregation_object_string = JSON.stringify(aggregation_object);
                             this.sendToServer(aggregation_object_string);
@@ -190,8 +203,8 @@ export class AggregatorInstantiator {
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
-                            aggregation_window_from: this.from_date,
-                            aggregation_window_to: this.to_date,
+                            aggregation_window_from: new Date(window_timestamp_from),
+                            aggregation_window_to: new Date(window_timestamp_to),
                         };
                         const aggregation_object_string = JSON.stringify(aggregation_object);
                         this.sendToServer(aggregation_object_string);
@@ -401,6 +414,18 @@ export class AggregatorInstantiator {
         return Object.keys(fallbackRow).length > 0 ? [fallbackRow] : [];
     }
 
+    private reduceBindingRowsForEvaluation(bindingRows: Record<string, string>[]): Record<string, string>[] {
+        if (bindingRows.length <= 1) {
+            return bindingRows;
+        }
+        if (!this.aggregationFunction) {
+            return bindingRows;
+        }
+
+        const firstProjectedRow = bindingRows.find((row) => this.resolveProjectedNumericValue(row) !== undefined);
+        return firstProjectedRow ? [firstProjectedRow] : [bindingRows[0]];
+    }
+
     private isBindingVariableKey(key: any): boolean {
         if (typeof key === 'string') {
             return key.startsWith('?') || /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
@@ -481,13 +506,51 @@ export class AggregatorInstantiator {
         return candidate;
     }
 
+    private resolveProjectedNumericValue(bindingRow: Record<string, string>): string | undefined {
+        for (const projectedVariable of this.projectedVariables) {
+            const normalizedCandidates = projectedVariable.startsWith('?')
+                ? [projectedVariable, projectedVariable.slice(1)]
+                : [projectedVariable, `?${projectedVariable}`];
+            for (const candidate of normalizedCandidates) {
+                const value = bindingRow[candidate];
+                if (value !== undefined && Number.isFinite(Number(value))) {
+                    return value;
+                }
+            }
+        }
+
+        const aggregateFallbacks = ['?avg', 'avg', '?max', 'max', '?min', 'min', '?sum', 'sum', '?count', 'count'];
+        for (const candidate of aggregateFallbacks) {
+            const value = bindingRow[candidate];
+            if (value !== undefined && Number.isFinite(Number(value))) {
+                return value;
+            }
+        }
+
+        return bindingRow['?spo2Value'] ?? bindingRow['spo2Value'] ?? this.findNumericValue(bindingRow);
+    }
+
+    private normalizeWindowTimestamps(timestampFrom: number, timestampTo: number, evaluationNow: number): { from: number; to: number } {
+        const minLikelyEpochMs = Date.UTC(2000, 0, 1);
+        const rawFromIsEpoch = Number.isFinite(timestampFrom) && timestampFrom >= minLikelyEpochMs;
+        const rawToIsEpoch = Number.isFinite(timestampTo) && timestampTo >= minLikelyEpochMs;
+
+        if (rawFromIsEpoch && rawToIsEpoch && timestampTo >= timestampFrom) {
+            return { from: timestampFrom, to: timestampTo };
+        }
+
+        const normalizedTo = evaluationNow;
+        const normalizedFrom = this.windowWidthMs > 0 ? evaluationNow - this.windowWidthMs : evaluationNow;
+        return { from: normalizedFrom, to: normalizedTo };
+    }
+
     private findUriLikeValue(bindingRow: Record<string, string>): string | undefined {
         const candidate = Object.values(bindingRow).find((value) => typeof value === 'string' && /^https?:\/\//.test(value));
         return candidate;
     }
 
     private reasonerOutputContainsAlert(reasonedResult: string): boolean {
-        return reasonedResult.includes('alert');
+        return ContinuousAnomalyMonitoringService.outputContainsAlertTriple(reasonedResult);
     }
 
     private debugBindingRowVariables(bindingRow: Record<string, string>, rowIndex: number): void {
