@@ -7,6 +7,7 @@ import { find_relevant_streams, hash_string_md5 } from "../utils/Util";
 import { QueryHandler } from "./QueryHandler";
 import { RSPQLParser } from "../service/parsers/RSPQLParser";
 import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
+import { RegisterQueryResult } from "../service/query-registry/AuditLoggedQueryService";
 import { TokenManagerService } from "../service/authorization/TokenManagerService";
 import { AggregationFocusExtractor } from "../service/parsers/AggregationFocusExtractor";
 import { getAuthenticatedSession } from "@treecg/versionawareldesinldp";
@@ -15,6 +16,7 @@ import * as dotenv from 'dotenv';
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 import { ContinuousAnomalyMonitoringService } from "../service/reasoner/ContinuousAnomalyMonitoringService";
 import { getUmaClaim } from "../config/UmaClaim";
+import { BenchmarkTimingContext, cloneBenchmarkTiming, createBenchmarkTimingContext, isBenchmarkTimingEnabled, maybeMarkBenchmarkNs } from "../utils/benchmark/BenchmarkTiming";
 dotenv.config();
 
 /**
@@ -80,6 +82,8 @@ export class WebSocketHandler {
                     const message_utf8 = message.utf8Data;
                     const ws_message = JSON.parse(message_utf8);
                     if (Object.keys(ws_message).includes('query') && Object.keys(ws_message).includes('rules')) {
+                        const benchmarkTiming = this.createBenchmarkTimingFromMessage(ws_message);
+                        maybeMarkBenchmarkNs(benchmarkTiming, 'server_received_at_ns');
                         this.logger.info({ query: ws_message.query }, `new_query_received_from_client_ws`);
                         this.logger.info({ rules: ws_message.rules }, `rule_received_from_client_ws`);
                         const actor_webid = ws_message.actor_webid || ws_message.actor || ws_message.webid || 'unknown-actor';
@@ -93,8 +97,9 @@ export class WebSocketHandler {
                             const monitoringService = ContinuousAnomalyMonitoringService.getInstance(rules);
                             const streams = this.return_streams(ldes_query)
                             this.set_connections(query_hashed, connection);
-                            await this.authorizeDerivedResource(streams);
-                            this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger, actor_webid, streams);
+                            await this.authorizeDerivedResource(streams, benchmarkTiming);
+                            const registration = await this.process_query(ldes_query, rules, width, query_type, this.event_emitter, this.logger, actor_webid, streams, benchmarkTiming);
+                            this.maybeSendBenchmarkAck(connection, query_hashed, registration?.query_id, benchmarkTiming);
                         }
                         else {
                             throw new Error(`The type of Query is not supported/handled. The type of query is: ${ws_message.type}`);
@@ -103,6 +108,9 @@ export class WebSocketHandler {
                     else if (Object.keys(ws_message).includes('aggregation_event')) {
                         this.logger.info({ query_id: ws_message.query_hash }, `aggregation_event_received_now_publishing_to_client_ws`);
                         const query_hash = ws_message.query_hash;
+                        if (ws_message.benchmark_timing && isBenchmarkTimingEnabled() && ws_message.benchmark_timing.server_sent_at_ns === undefined) {
+                            ws_message.benchmark_timing.server_sent_at_ns = process.hrtime.bigint().toString();
+                        }
                         for (const [query, connections] of this.connections) {
                             if (query === query_hash) {
                                 for (const connection of connections) {
@@ -262,8 +270,8 @@ export class WebSocketHandler {
      * @param {EventEmitter} event_emitter - The event emitter object.
      * @memberof WebSocketHandler
      */
-    public process_query(query: string, rules: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any, actor_webid: string, authorization_scope: string[]) {
-        QueryHandler.handle_ws_query(query, rules, width, this.query_registry, this.logger, this.connections, query_type, event_emitter, actor_webid, authorization_scope);
+    public process_query(query: string, rules: string, width: number, query_type: string, event_emitter: EventEmitter, logger: any, actor_webid: string, authorization_scope: string[], benchmarkTiming?: BenchmarkTimingContext): Promise<RegisterQueryResult | undefined> {
+        return QueryHandler.handle_ws_query(query, rules, width, this.query_registry, this.logger, this.connections, query_type, event_emitter, actor_webid, authorization_scope, benchmarkTiming);
     }
 
     public get_query_registry(): AuditLoggedQueryService {
@@ -305,7 +313,7 @@ export class WebSocketHandler {
         this.logger.info({ query_id: query_hashed }, `websocket_connection_set_for_query`);
     }
 
-    public async preAuthorize(resource: string, method: string, headers: HeadersInit = {}, body?: string): Promise<void> {
+    public async preAuthorize(resource: string, method: string, headers: HeadersInit = {}, body?: string, benchmarkTiming?: BenchmarkTimingContext): Promise<void> {
         if (method === undefined) {
             console.log(`The method is not defined. The default method is set to POST.`);
             method = "POST"
@@ -321,7 +329,7 @@ export class WebSocketHandler {
             requestInit.body = body;
         }
 
-        await this.uma_fetcher.fetch(resource, requestInit);
+        await this.uma_fetcher.fetch(resource, requestInit, benchmarkTiming);
     }
 
 
@@ -365,7 +373,7 @@ export class WebSocketHandler {
         });
     }
 
-    public async authorizeDerivedResource(containers_to_publish: string[]) {
+    public async authorizeDerivedResource(containers_to_publish: string[], benchmarkTiming?: BenchmarkTimingContext) {
         const derivedResources: string[] = containers_to_publish.map(url => {
             const trimmed = url.endsWith('/') ? url.slice(0, -1) : url;
             const parts = trimmed.split('/');
@@ -380,18 +388,41 @@ export class WebSocketHandler {
         await Promise.all(
             derivedResources.map(async (container, index) => {
                 try {
-                    await this.preAuthorize(container, 'GET');
+                    await this.preAuthorize(container, 'GET', {}, undefined, benchmarkTiming);
                 } catch (error) {
                     const fallback = containers_to_publish[index];
                     console.warn(`[UMA] Derived pre-authorization failed for ${container}. Falling back to stream ${fallback}.`, error);
                     try {
-                        await this.preAuthorize(fallback, 'GET');
+                        await this.preAuthorize(fallback, 'GET', {}, undefined, benchmarkTiming);
                     } catch (fallbackError) {
                         console.warn(`[UMA] Fallback pre-authorization failed for ${fallback}. Continuing without pre-authorization.`, fallbackError);
                     }
                 }
             })
         );
+    }
+
+    private createBenchmarkTimingFromMessage(wsMessage: any): BenchmarkTimingContext | undefined {
+        if (!isBenchmarkTimingEnabled()) {
+            return undefined;
+        }
+        const correlationId = typeof wsMessage.correlation_id === 'string' && wsMessage.correlation_id.length > 0
+            ? wsMessage.correlation_id
+            : hash_string_md5(`${wsMessage.query}|${Date.now()}`);
+        return createBenchmarkTimingContext(correlationId);
+    }
+
+    private maybeSendBenchmarkAck(connection: WebSocket.connection, queryHash: string, queryId: string | undefined, benchmarkTiming?: BenchmarkTimingContext): void {
+        if (!benchmarkTiming?.enabled) {
+            return;
+        }
+        connection.send(JSON.stringify({
+            type: 'benchmark_ack',
+            status: 'registered',
+            query_hash: queryHash,
+            query_id: queryId,
+            benchmark_timing: cloneBenchmarkTiming(benchmarkTiming),
+        }));
     }
     
 }

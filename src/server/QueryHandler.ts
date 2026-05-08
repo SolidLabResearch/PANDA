@@ -1,8 +1,9 @@
 import { storeToString } from "@treecg/versionawareldesinldp";
-import { AuditLoggedQueryService } from "../service/query-registry/AuditLoggedQueryService";
+import { AuditLoggedQueryService, RegisterQueryResult } from "../service/query-registry/AuditLoggedQueryService";
 import { AggregationDispatcher } from "../service/result-dispatcher/AggregationDispatcher";
 import { RequestBody } from "../utils/Types";
 import { hash_string_md5 } from "../utils/Util";
+import { BenchmarkTimingContext } from "../utils/benchmark/BenchmarkTiming";
 const websocketConnection = require('websocket').connection;
 const WebSocketClient = require('websocket').client;
 const N3 = require('n3');
@@ -39,7 +40,7 @@ export class QueryHandler {
      * @param {any} event_emitter - The event emitter object.
      * @memberof QueryHandler
      */
-    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any, actor_webid: string = 'unknown-actor', authorization_scope: string[] = []) {
+    public static async handle_ws_query(query: string, rules: string, width: number, query_registry: AuditLoggedQueryService, logger: any, websocket_connections: any, query_type: string, event_emitter: any, actor_webid: string = 'unknown-actor', authorization_scope: string[] = [], benchmarkTiming?: BenchmarkTimingContext): Promise<RegisterQueryResult | undefined> {
         const aggregation_dispatcher = new AggregationDispatcher(query);
         const to_timestamp = new Date().getTime(); // current time
         const from_timestamp = new Date(to_timestamp - (width)).getTime(); // latest seconds ago
@@ -54,7 +55,8 @@ export class QueryHandler {
                 query_type,
                 event_emitter,
                 actor_webid,
-                authorization_scope
+                authorization_scope,
+                benchmarkTiming
             });
 
             if (registration.should_execute) {
@@ -100,7 +102,7 @@ export class QueryHandler {
         } catch (error: any) {
             logger.error({ query_id: query_hashed, error: error?.message ?? String(error) }, 'query_registration_failed');
         }
-
+        return undefined;
     }
     /**
      * Connect with the Websocket server of the Solid Stream Aggregator.

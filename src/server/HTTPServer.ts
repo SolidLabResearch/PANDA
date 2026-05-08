@@ -75,36 +75,41 @@ export class HTTPServer {
                     body = body + chunk.toString();
                 });
                 req.on('end', async () => {
-                    const webhook_notification_data = JSON.parse(body);
-                    this.logger.info({}, 'webhook_notification_data_received');
+                    try {
+                        const webhook_notification_data = JSON.parse(body);
+                        this.logger.info({}, 'webhook_notification_data_received');
 
+                        if (webhook_notification_data.type === 'Add') {
+                            this.logger.info({}, 'webhook_notification_received');
+                            const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
+                            const topic = resolveNotificationTopic(webhook_notification_data, target);
+                            const fetchTarget = topic;
 
-                    if (webhook_notification_data.type === 'Add') {
-                        this.logger.info({}, 'webhook_notification_received');
-                        const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
-                        const topic = resolveNotificationTopic(webhook_notification_data, target);
-                        const fetchTarget = topic;
-
-                        if (!fetchTarget || !topic) {
-                            this.logger.error({}, 'webhook_notification_missing_target_or_topic');
-                            return;
-                        }
-
-                        let latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
-                            method: 'GET',
-                            headers: {
-                                'Accept': 'text/turtle'
+                            if (!fetchTarget || !topic) {
+                                this.logger.error({}, 'webhook_notification_missing_target_or_topic');
+                                return;
                             }
-                        });
 
-                        if (latest_event_response.ok) {
-                            const latest_event = await latest_event_response.text();
-                            this.logger.info({ topic, fetch_target: fetchTarget }, 'webhook_notification_emitting_topic');
-                            this.event_emitter.emit(topic, latest_event);
-                            this.logger.info({}, 'webhook_notification_processed_and_emitted');
-                        } else {
-                            console.error(`Failed to fetch notified resource ${fetchTarget}. Status: ${latest_event_response.status}`);
+                            const latest_event_response = await this.uma_fetcher.fetch(fetchTarget, {
+                                method: 'GET',
+                                headers: {
+                                    'Accept': 'text/turtle'
+                                }
+                            });
+
+                            if (latest_event_response.ok) {
+                                const latest_event = await latest_event_response.text();
+                                this.logger.info({ topic, fetch_target: fetchTarget }, 'webhook_notification_emitting_topic');
+                                this.event_emitter.emit(topic, latest_event);
+                                this.logger.info({}, 'webhook_notification_processed_and_emitted');
+                            } else {
+                                console.error(`Failed to fetch notified resource ${fetchTarget}. Status: ${latest_event_response.status}`);
+                                this.logger.warn({ topic, fetch_target: fetchTarget, status: latest_event_response.status }, 'webhook_notification_fetch_failed');
+                            }
                         }
+                    } catch (error: any) {
+                        console.error(`Error while handling webhook notification: ${error?.message ?? String(error)}`);
+                        this.logger.error({ error: error?.message ?? String(error) }, 'webhook_notification_processing_failed');
                     }
                 });
                 break;

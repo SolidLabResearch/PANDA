@@ -15,6 +15,14 @@ You can automatically fix some issues via
 npm run lint:ts:fix
 ```
 
+## Benchmarking
+
+Benchmark harnesses live under [`scripts/benchmark`](./scripts/benchmark). For the live websocket registration path, start PANDA with `BENCHMARK_TIMING=1` and run:
+
+```shell
+npm run benchmark:live-registration -- --runs 30 --warmup 5
+```
+
 ## License
 
 This code is copyrighted by [Ghent University - imec](https://www.ugent.be/ea/idlab/en) and released under the [MIT Licence](./LICENCE) 

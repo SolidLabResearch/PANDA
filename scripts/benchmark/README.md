@@ -119,6 +119,82 @@ The summary JSON and CSV include:
 - `total_flow_latency_ms`: end-to-end latency for one UMA authorization cycle
 - `policy_post_latency_ms`: optional policy POST latency
 
+## Live websocket registration benchmark
+
+Use `benchmark_live_registration.js` to measure the live registration path from websocket client send to first websocket result received.
+
+### What it measures
+
+- `ws_connect_ms`: TCP/websocket connect to PANDA
+- `registration_send_to_ack_ms`: request send until explicit benchmark ack from PANDA
+- `registration_send_to_first_message_ms`: request send until first aggregation or alert message arrives
+- `first_message_server_timestamp_to_client_receive_ms`: PANDA send timestamp to client receive timestamp
+- `rsp_window_wait_ms`: PANDA query registration to first RSP window evaluation completion
+- `rule_eval_ms`: first EYE rule evaluation duration for the first emitted result
+- `uma_challenge_ms`: tokenless protected GET latency until UMA challenge response
+- `uma_token_exchange_ms`: UMA token endpoint latency
+- `uma_protected_get_ms`: latency of the authorized protected GET
+- `total_uma_grant_ms`: total UMA overhead for the measured authorization cycle
+- `total_client_observed_ms`: client connect start to first result receive
+
+Interpretation:
+
+- UMA overhead is `uma_challenge_ms + uma_token_exchange_ms + uma_protected_get_ms`, or directly `total_uma_grant_ms`
+- RSP/window waiting is primarily `rsp_window_wait_ms`
+- EYE/rule evaluation is `rule_eval_ms`
+
+### Required server mode
+
+Start PANDA with benchmark timing enabled:
+
+```bash
+BENCHMARK_TIMING=1 npm start
+```
+
+The benchmark ack and server-side timestamps are emitted only in this mode. Normal PANDA behavior stays unchanged when the flag is unset.
+
+### Stack startup
+
+1. Start CSS/UMA without wiping existing file-backed storage.
+2. Start PANDA with `BENCHMARK_TIMING=1`.
+3. Ensure the monitored stream `http://localhost:3000/alice/spo2/` already exists and continues producing live events.
+
+### Run
+
+```bash
+node scripts/benchmark/benchmark_live_registration.js --runs 30 --warmup 5
+```
+
+Or:
+
+```bash
+npm run benchmark:live-registration -- --runs 30 --warmup 5
+```
+
+If PANDA is already running and you want a single wrapper that waits for PANDA readiness, starts the replayer, and then starts the benchmark:
+
+```bash
+npm run benchmark:live-registration:with-replayer -- --runs 30 --warmup 5
+```
+
+Useful flags:
+
+- `--skip-replayer`: benchmark only, do not start the external replayer
+- `--panda-http-url http://localhost:8080/`: change PANDA readiness URL
+- `--replayer-repo "/absolute/path/to/policy-aware-decentralized-stream-replayer"`: override replayer repo path
+
+Outputs:
+
+- `benchmark-results/live-registration-benchmark-<timestamp>.jsonl`: one JSON object per run
+- `benchmark-results/live-registration-benchmark-<timestamp>.summary.json`: aggregated statistics
+
+Each JSONL row contains phase markers so you can distinguish:
+
+- cold warmup runs vs measured runs
+- repeated websocket registrations across runs
+- cached token/RPT reuse through `used_stored_token` and `used_cached_rpt`
+- repeated messages within the same registration via `extra_message_count_after_first`
+
 ### Detailed latency tracing
 
 Enable per-step tracing (JSON-serializable) with:

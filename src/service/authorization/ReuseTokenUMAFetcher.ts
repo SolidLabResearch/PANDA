@@ -1,6 +1,7 @@
 import { fetch } from 'cross-fetch';
 import { TokenManagerService } from './TokenManagerService';
 import { Claim, parseAuthenticateHeader } from './UserManagedAccessFetcher';
+import { BenchmarkTimingContext, BenchmarkUmaTiming, durationMs, nowNs } from '../../utils/benchmark/BenchmarkTiming';
 
 /**
  * UMA Fetcher that first attempts to reuse a previously issued access token
@@ -15,8 +16,15 @@ export class ReuseTokenUMAFetcher {
         this.tokenManagerService = TokenManagerService.getInstance();
     }
 
-    public async fetch(url: string, init: RequestInit = {}): Promise<Response> {
+    public async fetch(url: string, init: RequestInit = {}, benchmarkTiming?: BenchmarkTimingContext): Promise<Response> {
         console.log(`[Fetcher] Attempting to fetch: ${url}`);
+        const benchmarkUma: BenchmarkUmaTiming | undefined = benchmarkTiming?.enabled && !benchmarkTiming.firstUmaRecorded
+            ? {
+                resource: url,
+                used_stored_token: false,
+                used_cached_rpt: false,
+            }
+            : undefined;
 
         // Step 0: Try stored token first (check for existing token in cache)
         let tokenInfo;
@@ -31,13 +39,23 @@ export class ReuseTokenUMAFetcher {
             if (tokenInfo.access_token && tokenInfo.token_type) {
                 const headers = new Headers(init.headers);
                 headers.set('Authorization', `${tokenInfo.token_type} ${tokenInfo.access_token}`);
+                benchmarkUma && (benchmarkUma.used_stored_token = true);
 
                 try {
+                    const storedTokenFetchStartedAt = benchmarkUma ? nowNs() : undefined;
                     const response = await fetch(url, { ...init, headers });
                     console.log(`[Fetcher] Response from stored token fetch: ${response.status}`);
+                    if (benchmarkUma && storedTokenFetchStartedAt !== undefined) {
+                        benchmarkUma.uma_protected_get_ms = durationMs(storedTokenFetchStartedAt, nowNs());
+                    }
 
                     if (response.ok) {
                         console.log(`[Fetcher] Stored token succeeded for ${url}`);
+                        if (benchmarkUma) {
+                            benchmarkUma.total_uma_grant_ms = benchmarkUma.uma_protected_get_ms;
+                            benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                            benchmarkTiming!.firstUmaRecorded = true;
+                        }
                         return response;
                     }
 
@@ -57,7 +75,11 @@ export class ReuseTokenUMAFetcher {
         let noTokenResponse: Response;
         try {
             console.log(`[Fetcher] Attempting tokenless request to get challenge.`);
+            const challengeStartedAt = benchmarkUma ? nowNs() : undefined;
             noTokenResponse = await fetch(url, init);
+            if (benchmarkUma && challengeStartedAt !== undefined) {
+                benchmarkUma.uma_challenge_ms = durationMs(challengeStartedAt, nowNs());
+            }
         } catch (err) {
             console.error(`[Fetcher] Network error during tokenless request:`, err);
             throw err;
@@ -88,12 +110,21 @@ export class ReuseTokenUMAFetcher {
         const existingRPT = this.tokenManagerService.getRPT(ticket);
         if (existingRPT) {
             console.log(`[Fetcher] Using previously cached RPT.`);
+            benchmarkUma && (benchmarkUma.used_cached_rpt = true);
             const headers = new Headers(init.headers);
             headers.set('Authorization', `${existingRPT.token_type} ${existingRPT.access_token}`);
 
             try {
                 console.log(`[Fetcher] Final request with cached RPT.`);
-                return await fetch(url, { ...init, headers });
+                const protectedGetStartedAt = benchmarkUma ? nowNs() : undefined;
+                const response = await fetch(url, { ...init, headers });
+                if (benchmarkUma && protectedGetStartedAt !== undefined) {
+                    benchmarkUma.uma_protected_get_ms = durationMs(protectedGetStartedAt, nowNs());
+                    benchmarkUma.total_uma_grant_ms = (benchmarkUma.uma_challenge_ms ?? 0) + (benchmarkUma.uma_protected_get_ms ?? 0);
+                    benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                    benchmarkTiming!.firstUmaRecorded = true;
+                }
+                return response;
             } catch (err) {
                 console.error(`[Fetcher] Final fetch with cached RPT failed:`, err);
                 throw err;
@@ -114,6 +145,7 @@ export class ReuseTokenUMAFetcher {
         let rptResponse: Response;
         try {
             console.log(`[Fetcher] Requesting RPT from token endpoint.`);
+            const tokenExchangeStartedAt = benchmarkUma ? nowNs() : undefined;
             rptResponse = await fetch(tokenEndpoint, {
                 method: 'POST',
                 headers: {
@@ -121,6 +153,9 @@ export class ReuseTokenUMAFetcher {
                 },
                 body: JSON.stringify(rptRequestBody),
             });
+            if (benchmarkUma && tokenExchangeStartedAt !== undefined) {
+                benchmarkUma.uma_token_exchange_ms = durationMs(tokenExchangeStartedAt, nowNs());
+            }
         } catch (err) {
             console.error(`[Fetcher] Failed to request RPT:`, err);
             throw err;
@@ -144,7 +179,18 @@ export class ReuseTokenUMAFetcher {
 
         try {
             console.log(`[Fetcher] Final request with RPT.`);
-            return await fetch(url, { ...init, headers });
+            const protectedGetStartedAt = benchmarkUma ? nowNs() : undefined;
+            const response = await fetch(url, { ...init, headers });
+            if (benchmarkUma && protectedGetStartedAt !== undefined) {
+                benchmarkUma.uma_protected_get_ms = durationMs(protectedGetStartedAt, nowNs());
+                benchmarkUma.total_uma_grant_ms =
+                    (benchmarkUma.uma_challenge_ms ?? 0)
+                    + (benchmarkUma.uma_token_exchange_ms ?? 0)
+                    + (benchmarkUma.uma_protected_get_ms ?? 0);
+                benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                benchmarkTiming!.firstUmaRecorded = true;
+            }
+            return response;
         } catch (err) {
             console.error(`[Fetcher] Final fetch with RPT failed:`, err);
             throw err;

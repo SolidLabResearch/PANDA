@@ -6,6 +6,7 @@ import { hash_string_md5 } from "../../utils/Util";
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from "crypto";
+import { BenchmarkTimingContext, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
 const websocketConnection = require('websocket').connection;
 const WebSocketClient = require('websocket').client;
 
@@ -41,6 +42,7 @@ export interface RegisterQueryInput {
     event_emitter: any;
     actor_webid: string;
     authorization_scope: string[];
+    benchmarkTiming?: BenchmarkTimingContext;
 }
 
 export interface RegisterQueryResult {
@@ -219,6 +221,7 @@ export class AuditLoggedQueryService {
                 {
                     queryId: query_id,
                     actorWebId: input.actor_webid,
+                    benchmarkTiming: input.benchmarkTiming,
                     onDataAccess: (resource: string) => {
                         this.logAccess(query_id, {
                             user: input.actor_webid,
@@ -232,6 +235,7 @@ export class AuditLoggedQueryService {
                     }
                 }
             );
+            maybeMarkBenchmarkNs(input.benchmarkTiming, 'query_registered_at_ns');
 
             input.logger.info({ query_id }, 'query_is_unique_and_executing');
             return {

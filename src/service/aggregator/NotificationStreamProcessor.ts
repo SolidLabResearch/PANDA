@@ -4,6 +4,7 @@ import { LDESinLDP, LDPCommunication } from "@treecg/versionawareldesinldp";
 import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
+import { BenchmarkTimingContext, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
 const DF = new DataFactory();
 import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
@@ -116,6 +117,10 @@ export class NotificationStreamProcessor {
         const expected_property_iri = process.env.PANDA_EXPECTED_PROPERTY_IRI;
         const eventHandler = async (latest_event: string) => {
             this.auditContext?.onDataAccess?.(this.ldes_stream);
+            if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstStreamEventRecorded) {
+                maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_stream_event_at_ns', true);
+                this.auditContext.benchmarkTiming.firstStreamEventRecorded = true;
+            }
             this.logger.info({}, 'latest_event_received_preprocessing_started');
             const processing_started_epoch = Date.now();
             console.log(`[VALIDATION][INGEST] event_received stream=${this.ldes_stream} processing_time_iso=${new Date(processing_started_epoch).toISOString()} processing_time_epoch=${processing_started_epoch}`);
@@ -183,7 +188,13 @@ export class NotificationStreamProcessor {
         };
 
         for (const topic of this.getEventTopics()) {
-            event_emitter.on(topic, eventHandler);
+            event_emitter.on(topic, (latest_event: string) => {
+                void eventHandler(latest_event).catch((error: Error) => {
+                    this.logger.error({ topic, error: error.message }, 'latest_event_handler_failed');
+                    console.warn(`Latest event handler failed for topic ${topic}.`, error);
+                    this.auditContext?.onExecutionFailed?.(error.message);
+                });
+            });
         }
     }
 
@@ -238,6 +249,7 @@ export class NotificationStreamProcessor {
 type QueryExecutionAuditContext = {
     queryId: string;
     actorWebId: string;
+    benchmarkTiming?: BenchmarkTimingContext;
     onDataAccess?: (resource: string) => void;
     onExecutionFailed?: (errorMessage: string) => void;
 }

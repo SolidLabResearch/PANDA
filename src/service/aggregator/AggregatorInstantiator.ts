@@ -12,6 +12,7 @@ import { NotificationStreamProcessor } from "./NotificationStreamProcessor";
 import { ContinuousAnomalyMonitoringService } from "../reasoner/ContinuousAnomalyMonitoringService";
 import { getUmaClaim } from "../../config/UmaClaim";
 import { parseAuthenticateHeader } from "../authorization/UserManagedAccessFetcher";
+import { BenchmarkTimingContext, cloneBenchmarkTiming, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
 const WebSocketClient = require('websocket').client;
 const websocketConnection = require('websocket').connection;
 const parser = new RSPQLParser();
@@ -122,6 +123,7 @@ export class AggregatorInstantiator {
      * @memberof AggregatorInstantiator
      */
     public async subscribeRStream() {
+        maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rsp_subscription_started_at_ns', true);
         this.connect_with_server('ws://localhost:8080/').then(() => {
             console.log(`The connection with the websocket server has been established.`);
             this.connection.connected = true;
@@ -129,6 +131,10 @@ export class AggregatorInstantiator {
         this.client.on('connect', (connection: typeof websocketConnection) => {
             console.log(`The connection with the server has been established. ${connection.connected}`);
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
+                if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstWindowEvaluatedRecorded) {
+                    maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rsp_window_evaluated_at_ns', true);
+                    this.auditContext.benchmarkTiming.firstWindowEvaluatedRecorded = true;
+                }
                 const evaluation_now = Date.now();
                 const normalizedWindow = this.normalizeWindowTimestamps(
                     object.timestamp_from,
@@ -165,8 +171,15 @@ export class AggregatorInstantiator {
                     if (this.rules === '') {
                         const fetched_rules = await this.fetch_rules_from_query(this.query);
                         if (fetched_rules) {
-                            const reasoner = ContinuousAnomalyMonitoringService.getInstance(fetched_rules);
+                        const reasoner = ContinuousAnomalyMonitoringService.getInstance(fetched_rules);
+                            if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
+                                maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_started_at_ns', true);
+                            }
                             const reasoned_result = await reasoner.reason(aggregation_event);
+                            if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
+                                maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_finished_at_ns', true);
+                                this.auditContext.benchmarkTiming.firstRuleEvalRecorded = true;
+                            }
                             const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
                             console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                             if (inferredAlert) {
@@ -178,6 +191,7 @@ export class AggregatorInstantiator {
                                 aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                                 aggregation_window_from: new Date(window_timestamp_from),
                                 aggregation_window_to: new Date(window_timestamp_to),
+                                benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
                             };
                             const aggregation_object_string = JSON.stringify(aggregation_object);
                             this.sendToServer(aggregation_object_string);
@@ -191,8 +205,14 @@ export class AggregatorInstantiator {
                         const reasoner = ContinuousAnomalyMonitoringService.getInstance(this.rules);
                         console.log(this.rules);
                         console.log(`[VALIDATION][RULE] evaluation_started processing_time_epoch=${Date.now()} has_rules_inline=${this.rules !== ''}`);
-
+                        if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
+                            maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_started_at_ns', true);
+                        }
                         const reasoned_result = await reasoner.reason(aggregation_event);
+                        if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
+                            maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_finished_at_ns', true);
+                            this.auditContext.benchmarkTiming.firstRuleEvalRecorded = true;
+                        }
                         console.log(`Reasoned Result is ${reasoned_result}`);
                         const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
                         console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
@@ -205,6 +225,7 @@ export class AggregatorInstantiator {
                             aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                             aggregation_window_from: new Date(window_timestamp_from),
                             aggregation_window_to: new Date(window_timestamp_to),
+                            benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
                         };
                         const aggregation_object_string = JSON.stringify(aggregation_object);
                         this.sendToServer(aggregation_object_string);
@@ -844,6 +865,7 @@ export class AggregatorInstantiator {
 type QueryExecutionAuditContext = {
     queryId: string;
     actorWebId: string;
+    benchmarkTiming?: BenchmarkTimingContext;
     onDataAccess?: (resource: string) => void;
     onExecutionFailed?: (errorMessage: string) => void;
 }

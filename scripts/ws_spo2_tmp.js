@@ -1,12 +1,38 @@
 const WebSocketClient = require('websocket').client;
+const util = require('util');
 const c = new WebSocketClient();
+
+function describeError(error) {
+  if (!error) {
+    return 'unknown error';
+  }
+  const payload = {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    stack: error.stack,
+  };
+  if (Array.isArray(error.errors)) {
+    payload.errors = error.errors.map((child) => ({
+      name: child?.name,
+      message: child?.message,
+      code: child?.code,
+      errno: child?.errno,
+      syscall: child?.syscall,
+      address: child?.address,
+      port: child?.port,
+      stack: child?.stack,
+    }));
+  }
+  return util.inspect(payload, { depth: 6, colors: false });
+}
 
 const query = `
 PREFIX saref: <https://saref.etsi.org/core/>
 PREFIX : <https://rsp.js/>
 REGISTER RStream <output> AS
 SELECT (AVG(?o) AS ?avg)
-FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE 60000 STEP 30000]
+FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE 30000 STEP 30000]
 WHERE {
   WINDOW :w1 {
     ?s saref:hasValue ?o .
@@ -44,7 +70,7 @@ c.on('connect', (conn) => {
 });
 
 c.on('connectFailed', (e) => {
-  console.error(String(e));
+  console.error(describeError(e));
   process.exit(1);
 });
 

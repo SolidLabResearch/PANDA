@@ -2,6 +2,7 @@ import { Bindings } from "@comunica/types";
 import { LDESinLDP, LDPCommunication, SolidCommunication } from "@treecg/versionawareldesinldp";
 import { RateLimitedLDPCommunication } from "rate-limited-ldp-communication";
 import { Quad } from "rdflib/lib/tf-types";
+import { BenchmarkTimingSnapshot } from "./benchmark/BenchmarkTiming";
 
 export type QuadWithID = {
     id: string;
@@ -56,7 +57,8 @@ export type aggregation_object = {
     query_hash: string,
     aggregation_event: string,
     aggregation_window_from: Date,
-    aggregation_window_to: Date
+    aggregation_window_to: Date,
+    benchmark_timing?: BenchmarkTimingSnapshot
 }
 
 export type Credentials = {
