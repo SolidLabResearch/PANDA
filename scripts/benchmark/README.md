@@ -182,6 +182,7 @@ Useful flags:
 - `--skip-replayer`: benchmark only, do not start the external replayer
 - `--panda-http-url http://localhost:8080/`: change PANDA readiness URL
 - `--replayer-repo "/absolute/path/to/policy-aware-decentralized-stream-replayer"`: override replayer repo path
+- `REPLAYER_REPO=/absolute/path/to/policy-aware-decentralized-stream-replayer`: env override for replayer repo path
 
 Outputs:
 
@@ -219,12 +220,26 @@ Useful toggles:
 Use the PANDA helper to start UMA with reproducible log capture:
 
 ```bash
-cd /Users/kushbisen/Code/PANDA\ Platform/panda
+cd <workspace>/PANDA
 npm run uma:start:odrl:logged
 # copy the printed export command, then run:
 export PANDA_UMA_ODRL_LOG_FILE="/absolute/path/to/panda/benchmark-results/uma-live-logs/uma-odrl-<timestamp>.log"
 npm run benchmark:uma-odrl:strict
 ```
+
+Benchmark sibling-repo defaults (resolved from `<workspace>/PANDA`):
+
+- `RSP-JS`: `<workspace>/RSP-JS`
+- `policy-aware-decentralized-stream-replayer`: `<workspace>/policy-aware-decentralized-stream-replayer`
+- `user-managed-access`: `<workspace>/user-managed-access`
+- `derived-resources-component`: `<workspace>/derived-resources-component`
+
+Override env vars:
+
+- `RSP_JS_REPO`
+- `REPLAYER_REPO`
+- `UMA_REPO`
+- `DERIVED_RESOURCES_REPO`
 
 The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing.
 

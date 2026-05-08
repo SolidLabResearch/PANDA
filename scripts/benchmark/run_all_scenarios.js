@@ -5,11 +5,21 @@ const { spawn, execFileSync } = require('child_process');
 const { randomUUID } = require('crypto');
 const { performance } = require('perf_hooks');
 const { client: WebSocketClient } = require('websocket');
+const {
+  repoRoot,
+  siblingDefaults,
+  resolveRepoPath,
+  ensureRepoExists,
+} = require('./workspace_paths');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = repoRoot;
 const SCENARIO_DIR = path.join(ROOT, 'benchmarks', 'scenarios');
 const RESULTS_ROOT = path.join(ROOT, 'benchmarks', 'results', 'runs');
-const UMA_DIR = process.env.PANDA_UMA_REPO_DIR || path.resolve(ROOT, '..', 'user-managed-access');
+const UMA_DIR = resolveRepoPath({
+  cliValue: null,
+  envVarName: 'UMA_REPO',
+  defaultPath: siblingDefaults.umaRepo,
+});
 const WS_PROTOCOL = 'solid-stream-aggregator-protocol';
 
 function parseArgs(argv) {
@@ -1619,6 +1629,11 @@ function printCriticalPathSummary(raw) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  ensureRepoExists(UMA_DIR, {
+    label: 'user-managed-access',
+    envVarName: 'UMA_REPO',
+    cliFlagName: null,
+  });
   const runRoot = path.join(RESULTS_ROOT, opts.benchmarkId);
   ensureDir(path.join(runRoot, 'raw'));
   ensureDir(path.join(runRoot, 'warmup'));

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { runDerivedPreflight } = require('../uma/preflight-derived');
+const { repoRoot } = require('./workspace_paths');
 
 function env(name, fallback) {
   const value = process.env[name];
@@ -66,7 +67,7 @@ function safeRead(filePath) {
 function strictOdrlLogSetupHint() {
   return [
     'To produce a valid live ODRL proof log, run:',
-    '  cd "/Users/kushbisen/Code/PANDA Platform/panda"',
+    `  cd "${repoRoot}"`,
     '  npm run uma:start:odrl:logged',
     '  export PANDA_UMA_ODRL_LOG_FILE="<path printed by helper>"',
   ].join('\n');
@@ -493,7 +494,7 @@ async function main() {
   await runDerivedPreflight({ resourcePaths: ['alice/spo2/'] });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outputDir = path.join(process.cwd(), 'benchmark-results', timestamp);
+  const outputDir = path.join(repoRoot, 'benchmark-results', timestamp);
   fs.mkdirSync(outputDir, { recursive: true });
 
   const config = {

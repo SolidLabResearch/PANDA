@@ -5,6 +5,12 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { spawnSync } = require('child_process');
 const { runDerivedPreflight } = require('../uma/preflight-derived');
+const {
+  repoRoot,
+  siblingDefaults,
+  resolveRepoPath,
+  ensureRepoExists,
+} = require('./workspace_paths');
 
 function nowMs() {
   return Number(process.hrtime.bigint()) / 1_000_000;
@@ -248,8 +254,11 @@ function inferOwnerEmail(resourceUrl) {
 }
 
 function findLocalUmaDemoPaths() {
-  const workspaceRoot = path.resolve(process.cwd(), '..');
-  const umaRoot = path.join(workspaceRoot, 'user-managed-access');
+  const umaRoot = resolveRepoPath({
+    cliValue: null,
+    envVarName: 'UMA_REPO',
+    defaultPath: siblingDefaults.umaRepo,
+  });
   const source = path.join(umaRoot, 'demo', 'data');
   const target = path.join(umaRoot, 'packages', 'css', 'tmp');
   return { source, target };
@@ -905,7 +914,7 @@ async function runIteration(config, iteration, phase) {
 }
 
 async function main() {
-  const outputDir = env('OUTPUT_DIR', path.join(process.cwd(), 'benchmark-results'));
+  const outputDir = env('OUTPUT_DIR', path.join(repoRoot, 'benchmark-results'));
   const outputPrefix = env('OUTPUT_PREFIX', 'uma-odrl-flow');
   const iterations = Number(env('ITERATIONS', '30'));
   const warmupIterations = Number(env('WARMUP_ITERATIONS', '5'));
@@ -953,6 +962,18 @@ async function main() {
 
   if (config.tokenRequestFilePath && !fs.existsSync(config.tokenRequestFilePath)) {
     throw new Error(`Token request file not found: ${config.tokenRequestFilePath}`);
+  }
+  if (config.autoHealLocalStack && isLocalUmaDemoResource(config.resourceUrl)) {
+    const umaRepo = resolveRepoPath({
+      cliValue: null,
+      envVarName: 'UMA_REPO',
+      defaultPath: siblingDefaults.umaRepo,
+    });
+    ensureRepoExists(umaRepo, {
+      label: 'user-managed-access',
+      envVarName: 'UMA_REPO',
+      cliFlagName: null,
+    });
   }
 
   await runDerivedPreflight({ resourcePaths: ['alice/spo2/'] });

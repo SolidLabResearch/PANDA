@@ -1,19 +1,25 @@
 #!/usr/bin/env node
 const { spawn } = require('child_process');
 const path = require('path');
+const {
+  repoRoot,
+  siblingDefaults,
+  resolveRepoPath,
+  ensureRepoExists,
+} = require('./workspace_paths');
 
 const DEFAULT_PANDA_HTTP_URL = 'http://localhost:8080/';
-const DEFAULT_REPLAYER_REPO = '/Users/kushbisen/Code/PANDA Platform/policy-aware-decentralized-stream-replayer';
 
 function parseArgs(argv) {
+  let replayerRepoCli = null;
   const out = {
     pandaHttpUrl: DEFAULT_PANDA_HTTP_URL,
-    replayerRepo: DEFAULT_REPLAYER_REPO,
+    replayerRepo: siblingDefaults.replayerRepo,
     runs: 30,
     warmup: 5,
     timeoutMs: 120000,
     observeMs: 1000,
-    benchmarkScript: path.join(process.cwd(), 'scripts', 'benchmark', 'benchmark_live_registration.js'),
+    benchmarkScript: path.join(repoRoot, 'scripts', 'benchmark', 'benchmark_live_registration.js'),
     startReplayer: true,
     readinessTimeoutMs: 60000,
     postReadyDelayMs: 2000,
@@ -25,7 +31,7 @@ function parseArgs(argv) {
     const key = argv[i];
     const next = argv[i + 1];
     if (key === '--panda-http-url') out.pandaHttpUrl = next;
-    if (key === '--replayer-repo') out.replayerRepo = next;
+    if (key === '--replayer-repo') replayerRepoCli = next;
     if (key === '--runs') out.runs = Number(next);
     if (key === '--warmup') out.warmup = Number(next);
     if (key === '--timeout-ms') out.timeoutMs = Number(next);
@@ -37,6 +43,11 @@ function parseArgs(argv) {
     if (key === '--target-message-index') out.targetMessageIndex = Number(next);
     if (key === '--skip-replayer') out.startReplayer = false;
   }
+  out.replayerRepo = resolveRepoPath({
+    cliValue: replayerRepoCli,
+    envVarName: 'REPLAYER_REPO',
+    defaultPath: siblingDefaults.replayerRepo,
+  });
   return out;
 }
 
@@ -69,6 +80,13 @@ function spawnChild(command, args, options = {}) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.startReplayer) {
+    ensureRepoExists(opts.replayerRepo, {
+      label: 'policy-aware-decentralized-stream-replayer',
+      envVarName: 'REPLAYER_REPO',
+      cliFlagName: '--replayer-repo',
+    });
+  }
   let closing = false;
 
   const cleanup = () => {
