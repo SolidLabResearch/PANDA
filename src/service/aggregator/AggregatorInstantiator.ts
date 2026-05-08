@@ -12,7 +12,8 @@ import { NotificationStreamProcessor } from "./NotificationStreamProcessor";
 import { ContinuousAnomalyMonitoringService } from "../reasoner/ContinuousAnomalyMonitoringService";
 import { getUmaClaim } from "../../config/UmaClaim";
 import { parseAuthenticateHeader } from "../authorization/UserManagedAccessFetcher";
-import { BenchmarkTimingContext, cloneBenchmarkTiming, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
+import { performance } from "perf_hooks";
+import { BenchmarkTimingContext, addBenchmarkMetric, cloneBenchmarkTiming, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
 const WebSocketClient = require('websocket').client;
 const websocketConnection = require('websocket').connection;
 const parser = new RSPQLParser();
@@ -64,7 +65,9 @@ export class AggregatorInstantiator {
         this.event_emitter = event_emitter;
         this.auditContext = auditContext;
         this.hash_string = hash_string_md5(query);
+        const rspEngineConstructStartedAt = performance.now();
         this.rsp_engine = new RSPEngine(query);
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rsp_engine_construct_ms', performance.now() - rspEngineConstructStartedAt);
         this.from_date = new Date(from_timestamp);
         this.to_date = new Date(to_timestamp);
         this.stream_array = [];
@@ -76,7 +79,9 @@ export class AggregatorInstantiator {
         parsedQuery.s2r.forEach((stream) => {
             this.stream_array.push(stream.stream_name);
         });
+        const emitterRegisterStartedAt = performance.now();
         this.rsp_emitter = this.rsp_engine.register();
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rsp_register_emitter_ms', performance.now() - emitterRegisterStartedAt);
         this.initializeProcessing(query_type);
     }
 
@@ -131,6 +136,12 @@ export class AggregatorInstantiator {
         this.client.on('connect', (connection: typeof websocketConnection) => {
             console.log(`The connection with the server has been established. ${connection.connected}`);
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
+                const resultEmitStartedAt = performance.now();
+                if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstResultEmittedRecorded) {
+                    this.auditContext.benchmarkTiming.firstResultEmitStartedAtMs = resultEmitStartedAt;
+                    maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_result_emitted_at_ns', true);
+                    this.auditContext.benchmarkTiming.firstResultEmittedRecorded = true;
+                }
                 if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstWindowEvaluatedRecorded) {
                     maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rsp_window_evaluated_at_ns', true);
                     this.auditContext.benchmarkTiming.firstWindowEvaluatedRecorded = true;
@@ -186,15 +197,18 @@ export class AggregatorInstantiator {
                                 console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                                 await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
                             }
+                            this.recordFirstResultEmitDuration();
                             const aggregation_object: aggregation_object = {
                                 query_hash: this.hash_string,
                                 aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                                 aggregation_window_from: new Date(window_timestamp_from),
                                 aggregation_window_to: new Date(window_timestamp_to),
+                                rsp_window_metadata: normalizedWindow.metadata,
                                 benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
                             };
                             const aggregation_object_string = JSON.stringify(aggregation_object);
                             this.sendToServer(aggregation_object_string);
+                            console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                             this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                         }
                         else {
@@ -220,15 +234,18 @@ export class AggregatorInstantiator {
                             console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                             await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
                         }
+                        this.recordFirstResultEmitDuration();
                         const aggregation_object: aggregation_object = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                             aggregation_window_from: new Date(window_timestamp_from),
                             aggregation_window_to: new Date(window_timestamp_to),
+                            rsp_window_metadata: normalizedWindow.metadata,
                             benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
                         };
                         const aggregation_object_string = JSON.stringify(aggregation_object);
                         this.sendToServer(aggregation_object_string);
+                        console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                         this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                     }
                 }
@@ -278,6 +295,17 @@ export class AggregatorInstantiator {
         else {
             throw new Error("The stream match is null.");
             return undefined;
+        }
+    }
+
+    private recordFirstResultEmitDuration(): void {
+        const benchmarkTiming = this.auditContext?.benchmarkTiming;
+        if (!benchmarkTiming?.enabled || benchmarkTiming.serverTiming.metrics?.first_result_emit_ms !== undefined) {
+            return;
+        }
+        const startedAt = benchmarkTiming.firstResultEmitStartedAtMs;
+        if (startedAt !== undefined) {
+            addBenchmarkMetric(benchmarkTiming, 'first_result_emit_ms', performance.now() - startedAt);
         }
     }
 
@@ -551,18 +579,38 @@ export class AggregatorInstantiator {
         return bindingRow['?spo2Value'] ?? bindingRow['spo2Value'] ?? this.findNumericValue(bindingRow);
     }
 
-    private normalizeWindowTimestamps(timestampFrom: number, timestampTo: number, evaluationNow: number): { from: number; to: number } {
+    private normalizeWindowTimestamps(timestampFrom: number, timestampTo: number, evaluationNow: number): { from: number; to: number; metadata: { raw_timestamp_from: number | null; raw_timestamp_to: number | null; event_time_span_ms: number | null; source: string } } {
         const minLikelyEpochMs = Date.UTC(2000, 0, 1);
         const rawFromIsEpoch = Number.isFinite(timestampFrom) && timestampFrom >= minLikelyEpochMs;
         const rawToIsEpoch = Number.isFinite(timestampTo) && timestampTo >= minLikelyEpochMs;
+        const rawFrom = Number.isFinite(timestampFrom) ? timestampFrom : null;
+        const rawTo = Number.isFinite(timestampTo) ? timestampTo : null;
 
         if (rawFromIsEpoch && rawToIsEpoch && timestampTo >= timestampFrom) {
-            return { from: timestampFrom, to: timestampTo };
+            return {
+                from: timestampFrom,
+                to: timestampTo,
+                metadata: {
+                    raw_timestamp_from: rawFrom,
+                    raw_timestamp_to: rawTo,
+                    event_time_span_ms: timestampTo - timestampFrom,
+                    source: 'rsp_engine_epoch_ms',
+                },
+            };
         }
 
         const normalizedTo = evaluationNow;
         const normalizedFrom = this.windowWidthMs > 0 ? evaluationNow - this.windowWidthMs : evaluationNow;
-        return { from: normalizedFrom, to: normalizedTo };
+        return {
+            from: normalizedFrom,
+            to: normalizedTo,
+            metadata: {
+                raw_timestamp_from: rawFrom,
+                raw_timestamp_to: rawTo,
+                event_time_span_ms: null,
+                source: 'derived_from_evaluation_clock',
+            },
+        };
     }
 
     private findUriLikeValue(bindingRow: Record<string, string>): string | undefined {

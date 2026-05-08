@@ -120,3 +120,21 @@ scratch/
 benchmark-results/**
 aggregator_resource_used-*.csv
 *.http.txt
+node_modules/
+dist/
+build/
+coverage/
+*.log
+*.tmp
+.DS_Store
+
+# Benchmark generated outputs
+benchmarks/results/runs/
+benchmarks/results/environment/
+
+# Runtime/generated local data
+query_audit_log.json
+scripts/data/
+
+# Local scratch scripts
+scripts/tmp-*.js

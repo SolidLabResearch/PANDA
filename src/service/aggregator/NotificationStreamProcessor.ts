@@ -4,7 +4,8 @@ import { LDESinLDP, LDPCommunication } from "@treecg/versionawareldesinldp";
 import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
-import { BenchmarkTimingContext, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
+import { performance } from "perf_hooks";
+import { BenchmarkTimingContext, incrementBenchmarkMetric, maybeMarkBenchmarkNs, recordRspEventAddDuration, recordRspStreamEventTimestamp } from "../../utils/benchmark/BenchmarkTiming";
 const DF = new DataFactory();
 import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
@@ -135,13 +136,16 @@ export class NotificationStreamProcessor {
              */
             let latest_event_store: any;
             try {
+                const parseStartedAt = performance.now();
                 latest_event_store = await turtleStringToStore(latest_event);
+                incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rdf_parse_ms', performance.now() - parseStartedAt);
             } catch (error) {
                 this.logger.warn({}, 'latest_event_parsing_failed_skipping_event');
                 console.warn(`Skipping malformed latest event for ${this.ldes_stream}.`, error);
                 return;
             }
             const parsed_quads = latest_event_store.getQuads(null, null, null, null);
+            incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rdf_quads_parsed_count', parsed_quads.length);
             console.log(`[VALIDATION][INGEST] parsed_quads_count stream=${this.ldes_stream} quad_count=${parsed_quads.length}`);
             parsed_quads.forEach((quad: any, index: number) => {
                 console.log(`[VALIDATION][INGEST] parsed_quad index=${index} subject=${quad.subject.value} predicate=${quad.predicate.value} object=${quad.object.value} object_termType=${quad.object.termType} object_datatype=${quad.object.datatype?.value ?? ''}`);
@@ -175,6 +179,7 @@ export class NotificationStreamProcessor {
             }
             console.log(`[VALIDATION][INGEST] timestamp_extracted stream=${this.ldes_stream} event_timestamp_literal=${timestamp} event_timestamp_epoch=${timestamp_epoch}`);
             if (this.stream_name) {
+                recordRspStreamEventTimestamp(this.auditContext?.benchmarkTiming, timestamp_epoch);
                 console.log(`[VALIDATION][INGEST] stream_add_decision event_id=${eventId} will_call_stream_add=true stream_name=${this.stream_name.name} quad_count=${parsed_quads.length}`);
                 this.logger.info({}, 'latest_event_received_preprocessing_completed_adding_to_rsp_engine_started');
                 console.log(`Adding the event store to the RSP Engine for the stream ${this.stream_name}`);
@@ -211,7 +216,13 @@ export class NotificationStreamProcessor {
             console.log(`[VALIDATION][INGEST] add_event_store_quads stream=${stream.name} quad_count=${quads.length} timestamp_epoch=${timestamp} timestamp_iso=${new Date(timestamp).toISOString()}`);
             for (const quad of quads) {
                 console.log(`[VALIDATION][INGEST] quad subject=${quad.subject.value} predicate=${quad.predicate.value} object=${quad.object.value}`);
+                if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstStreamEventAddedRecorded) {
+                    maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_stream_event_added_at_ns', true);
+                    this.auditContext.benchmarkTiming.firstStreamEventAddedRecorded = true;
+                }
+                const addStartedAt = performance.now();
                 stream.add(quad, timestamp)
+                recordRspEventAddDuration(this.auditContext?.benchmarkTiming, performance.now() - addStartedAt);
             }
         });
     }

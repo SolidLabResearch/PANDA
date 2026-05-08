@@ -409,7 +409,10 @@ export class WebSocketHandler {
         const correlationId = typeof wsMessage.correlation_id === 'string' && wsMessage.correlation_id.length > 0
             ? wsMessage.correlation_id
             : hash_string_md5(`${wsMessage.query}|${Date.now()}`);
-        return createBenchmarkTimingContext(correlationId);
+        const benchmarkRunId = typeof wsMessage.benchmark_run_id === 'string' && wsMessage.benchmark_run_id.length > 0
+            ? wsMessage.benchmark_run_id
+            : correlationId;
+        return createBenchmarkTimingContext(correlationId, benchmarkRunId);
     }
 
     private maybeSendBenchmarkAck(connection: WebSocket.connection, queryHash: string, queryId: string | undefined, benchmarkTiming?: BenchmarkTimingContext): void {

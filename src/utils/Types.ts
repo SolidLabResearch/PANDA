@@ -58,6 +58,12 @@ export type aggregation_object = {
     aggregation_event: string,
     aggregation_window_from: Date,
     aggregation_window_to: Date,
+    rsp_window_metadata?: {
+        raw_timestamp_from: number | null,
+        raw_timestamp_to: number | null,
+        event_time_span_ms: number | null,
+        source: string,
+    },
     benchmark_timing?: BenchmarkTimingSnapshot
 }
 
