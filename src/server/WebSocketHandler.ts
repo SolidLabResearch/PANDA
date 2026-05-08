@@ -16,7 +16,7 @@ import * as dotenv from 'dotenv';
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 import { ContinuousAnomalyMonitoringService } from "../service/reasoner/ContinuousAnomalyMonitoringService";
 import { getUmaClaim } from "../config/UmaClaim";
-import { BenchmarkTimingContext, cloneBenchmarkTiming, createBenchmarkTimingContext, isBenchmarkTimingEnabled, maybeMarkBenchmarkNs } from "../utils/benchmark/BenchmarkTiming";
+import { BenchmarkParsedWindowDefinition, BenchmarkTimingContext, cloneBenchmarkTiming, createBenchmarkTimingContext, isBenchmarkTimingEnabled, maybeMarkBenchmarkNs, setBenchmarkQueryDetails } from "../utils/benchmark/BenchmarkTiming";
 dotenv.config();
 
 /**
@@ -90,7 +90,8 @@ export class WebSocketHandler {
                         const query_type = ws_message.type;
                         if (query_type === 'historical+live' || query_type === 'live') {
                             this.logger.info({}, `query_preprocessing_started`);
-                            const { ldes_query, query_hashed, width } = await this.preprocess_query(ws_message.query);
+                            const { ldes_query, query_hashed, width, parsed_windows } = await this.preprocess_query(ws_message.query);
+                            setBenchmarkQueryDetails(benchmarkTiming, ldes_query, parsed_windows);
                             this.logger.info({ query_id: query_hashed }, `query_preprocessed`);
                             const rules = ws_message.rules;
                             console.log(rules);
@@ -284,13 +285,19 @@ export class WebSocketHandler {
      * @returns {Promise<{ ldes_query: string, query_hashed: string, width: number }>} - The preprocessed query (which now contains the LDES stream instead of just the pod), the hashed query and the width of the window.
      * @memberof WebSocketHandler
      */
-    public async preprocess_query(query: string): Promise<{ ldes_query: string, query_hashed: string, width: number }> {
+    public async preprocess_query(query: string): Promise<{ ldes_query: string, query_hashed: string, width: number, parsed_windows: BenchmarkParsedWindowDefinition[] }> {
         const parsed = this.parser.parse(query);
         const pod_url = parsed.s2r[0].stream_name;
         const ldes_query = query.replace(pod_url, pod_url);
         const width = parsed.s2r[0].width;
         const query_hashed = hash_string_md5(ldes_query);
-        return { ldes_query, query_hashed, width };
+        const parsed_windows = parsed.s2r.map((window) => ({
+            window_name: window.window_name,
+            stream_name: window.stream_name,
+            width: window.width,
+            slide: window.slide,
+        }));
+        return { ldes_query, query_hashed, width, parsed_windows };
     }
     /**
      * Set the connections for the given query.

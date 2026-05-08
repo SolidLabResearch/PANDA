@@ -68,7 +68,7 @@
         "pidusage": "^3.0.2",
         "rate-limited-ldp-communication": "^1.0.5",
         "rdflib": "^2.2.31",
-        "rsp-js": "^1.3.5",
+        "rsp-js": "file:../../RSP-JS",
         "rspql-query-equivalence": "^1.0.3",
         "sparqljs": "^3.6.2",
         "tslog": "^4.8.2",

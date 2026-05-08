@@ -412,9 +412,29 @@ async function runReplayer(scenario, opts, runRoot, benchmarkRunId, counters) {
   ensureFileExists(logFile);
   const [cmd, ...args] = command.split(/\s+/);
   const stopWatcher = startReplayerLogWatcher(logFile, counters);
+  const startedAtPerf = performance.now();
+  const startedAtWall = isoNow();
   const child = spawnLogged(cmd, args, { cwd: ROOT, env: process.env }, logFile);
+  const exitInfoPromise = new Promise((resolve) => {
+    child.on('exit', (code, signal) => {
+      resolve({
+        code,
+        signal,
+        exitedAtPerf: performance.now(),
+        exitedAtWall: isoNow(),
+      });
+    });
+  });
   child.stdout?.on?.('data', () => {});
-  return { child, logFile, command, stopWatcher };
+  return {
+    child,
+    logFile,
+    command,
+    stopWatcher,
+    startedAtPerf,
+    startedAtWall,
+    exitInfoPromise,
+  };
 }
 
 async function waitForReplayerActive(counters, timeoutMs) {
@@ -436,6 +456,7 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
     const result = {
       querySendAt: 0,
       querySendWall: null,
+      registeredQuery: null,
       ackAt: 0,
       ackWall: null,
       firstResultAt: 0,
@@ -544,6 +565,7 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
         benchmark_run_id: benchmarkRunId.replace(/-/g, '_'),
         query_window_ms: opts.queryWindow * 1000,
       });
+      result.registeredQuery = query;
       const payload = {
         query,
         rules: scenario.panda_query_payload.rules,
@@ -664,6 +686,18 @@ function aggregateDebugFieldNames(row) {
   ) && typeof row[key] === 'number' && Number.isFinite(row[key]));
 }
 
+function aggregationWindowDebugFields(message, prefix) {
+  const from = message?.aggregation_window_from || null;
+  const to = message?.aggregation_window_to || null;
+  const fromMs = from ? Date.parse(from) : NaN;
+  const toMs = to ? Date.parse(to) : NaN;
+  return {
+    [`${prefix}_aggregation_window_from`]: from,
+    [`${prefix}_aggregation_window_to`]: to,
+    [`${prefix}_aggregation_window_span_ms`]: Number.isFinite(fromMs) && Number.isFinite(toMs) ? Math.max(0, toMs - fromMs) : null,
+  };
+}
+
 function metricDefinitions() {
   const unavailable = (name, notes) => ({
     unit: 'ms',
@@ -755,6 +789,15 @@ function metricDefinitions() {
       interpretation: 'Event-time span reported by explicit RSP window metadata for the accepted result.',
       critical_path: true,
       notes: 'Only present when the benchmark accepts explicit RSP window metadata as proof of a full window.',
+    },
+    accepted_result_aggregation_window_span_ms: {
+      unit: 'ms',
+      type: 'derived',
+      start_event: 'accepted_result_aggregation_window_from',
+      end_event: 'accepted_result_aggregation_window_to',
+      interpretation: 'Span between aggregation_window_from and aggregation_window_to in the accepted result payload.',
+      critical_path: true,
+      notes: 'This is the RSP result payload window span, which can differ from cumulative post-registration event-span evidence.',
     },
     query_registered_to_result_received_ms: {
       unit: 'ms',
@@ -864,6 +907,33 @@ function metricDefinitions() {
       critical_path: false,
       notes: 'Counter.',
     },
+    source_events_with_current_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'stream_event_parse_start',
+      end_event: 'stream_event_parse_end',
+      interpretation: 'Number of parsed source-event payloads whose quads contain the current benchmark_run_id.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence captured inside PANDA before timestamp validation.',
+    },
+    source_events_without_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'stream_event_parse_start',
+      end_event: 'stream_event_parse_end',
+      interpretation: 'Number of parsed source-event payloads where no benchmark_run_id marker was detectable.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence. Container listings usually land here.',
+    },
+    source_events_with_other_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'stream_event_parse_start',
+      end_event: 'stream_event_parse_end',
+      interpretation: 'Number of parsed source-event payloads that appear to reference a different benchmark run.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence.',
+    },
     rsp_engine_construct_ms: {
       unit: 'ms',
       type: 'direct',
@@ -890,6 +960,33 @@ function metricDefinitions() {
       interpretation: 'Number of RDF quads added to the RSP stream for this query timing context.',
       critical_path: false,
       notes: 'Counter across live event ingestion.',
+    },
+    rsp_events_added_with_current_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'rsp_event_add_start',
+      end_event: 'rsp_event_add_end',
+      interpretation: 'Number of timestamp-valid source events added to the RSP engine that carried the current benchmark_run_id.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence for accepted-window provenance.',
+    },
+    rsp_events_added_without_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'rsp_event_add_start',
+      end_event: 'rsp_event_add_end',
+      interpretation: 'Number of timestamp-valid source events added to the RSP engine without a detectable benchmark_run_id.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence for accepted-window provenance.',
+    },
+    rsp_events_added_with_other_benchmark_run_id_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'rsp_event_add_start',
+      end_event: 'rsp_event_add_end',
+      interpretation: 'Number of timestamp-valid source events added to the RSP engine that appear to belong to a different benchmark run.',
+      critical_path: false,
+      notes: 'Event-level run-isolation evidence for accepted-window provenance.',
     },
     rsp_event_add_count_after_query_registration: {
       unit: 'count',
@@ -1165,6 +1262,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     git_commit: safeGitCommit(),
     node_version: process.version,
     scenario_id: scenario.scenario_id,
+    scenario_file_path: scenario.__scenario_file || null,
     run_id: runId,
     phase,
     mode: opts.mode,
@@ -1175,6 +1273,13 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     started_at: startedAt,
     completed_at: null,
     status: 'running',
+    registered_query: null,
+    query_template_source: null,
+    parsed_rspql_windows: null,
+    rsp_window_parameter_unit: null,
+    run_isolation: null,
+    replayer_process: null,
+    validation_warnings: [],
     sequence,
     metrics: {},
     http_statuses: httpStatuses,
@@ -1221,7 +1326,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     stopReplayerWatcher = replayer.stopWatcher || (() => {});
     markEvent('replayer_start');
     sequence.replayer_started = isoNow();
-    const replayerStartedAt = performance.now();
+    const replayerStartedAt = replayer.startedAtPerf;
     await waitForReplayerActive(counters, 30000);
     const delayRemaining = opts.queryRegistrationDelay * 1000 - (performance.now() - replayerStartedAt);
     if (delayRemaining > 0) await sleep(delayRemaining);
@@ -1230,6 +1335,16 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     }
     queryRegisterPostedCount = counters.posted;
     const queryResult = await registerQueryAndWait(scenario, opts, benchmarkRunId);
+    const serverQueryMetadata = extractServerQueryMetadata(queryResult);
+    raw.registered_query = queryResult.registeredQuery || serverQueryMetadata.registeredQuery;
+    raw.query_template_source = {
+      scenario_file_path: scenario.__scenario_file || null,
+      scenario_id: scenario.scenario_id,
+      query_template_before_substitution: scenario.panda_query_payload.query_template,
+      query_string_after_substitution: raw.registered_query,
+    };
+    raw.parsed_rspql_windows = serverQueryMetadata.parsedWindows;
+    raw.rsp_window_parameter_unit = serverQueryMetadata.windowParameterUnit;
     sequence.query_registered = queryResult.querySendWall || isoNow();
     sequence.query_register_ack = queryResult.ackWall || undefined;
     sequence.client_result_received = isoNow();
@@ -1260,9 +1375,15 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       rsp_first_event_after_query_registration_delay_ms: queryToFirstAddMs,
       rdf_parse_ms: metrics.rdf_parse_ms ?? null,
       rdf_quads_parsed_count: metrics.rdf_quads_parsed_count ?? 0,
+      source_events_with_current_benchmark_run_id_count: metrics.source_events_with_current_benchmark_run_id_count ?? null,
+      source_events_without_benchmark_run_id_count: metrics.source_events_without_benchmark_run_id_count ?? null,
+      source_events_with_other_benchmark_run_id_count: metrics.source_events_with_other_benchmark_run_id_count ?? null,
       rsp_engine_construct_ms: metrics.rsp_engine_construct_ms ?? null,
       rsp_register_emitter_ms: metrics.rsp_register_emitter_ms ?? null,
       rsp_event_add_count_total: metrics.rsp_event_add_count_total ?? 0,
+      rsp_events_added_with_current_benchmark_run_id_count: metrics.rsp_events_added_with_current_benchmark_run_id_count ?? null,
+      rsp_events_added_without_benchmark_run_id_count: metrics.rsp_events_added_without_benchmark_run_id_count ?? null,
+      rsp_events_added_with_other_benchmark_run_id_count: metrics.rsp_events_added_with_other_benchmark_run_id_count ?? null,
       rsp_event_add_count_after_query_registration: metrics.rsp_event_add_count_after_query_registration ?? 0,
       rsp_event_add_total_ms: metrics.rsp_event_add_total_ms ?? null,
       rsp_event_add_mean_ms: metrics.rsp_event_add_mean_ms ?? null,
@@ -1286,17 +1407,26 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.early_result_ignored_reasons_summary = queryResult.earlyResultIgnoredReasonsSummary;
     raw.early_result_ignored_samples = opts.mode === 'smoke' ? queryResult.earlyResultIgnoredSamples : undefined;
     Object.assign(raw, acceptedResultDebugFields(queryResult.acceptedResultEvidence));
+    Object.assign(raw, aggregationWindowDebugFields(queryResult.message, 'accepted_result'));
     Object.assign(raw, firstAnyResultDebugFields(queryResult.firstAnyResultEvidence));
     Object.assign(raw, ignoredResultDebugFields(queryResult.lastIgnoredPartialEvidence));
+    raw.run_isolation = buildRunIsolationEvidence(raw.metrics);
     raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);
     attachMetricDefinitions(raw);
-    if (replayer.child.exitCode === null) {
-      await new Promise((resolve) => replayer.child.on('exit', () => resolve()));
-    }
+    const replayerExitInfo = await replayer.exitInfoPromise;
     stopReplayerWatcher();
     markEvent('replayer_completed');
     sequence.replayer_completed = isoNow();
-    raw.metrics.replayer_total_runtime_ms = performance.now() - replayerStartedAt;
+    raw.replayer_process = {
+      command: replayer.command,
+      requested_duration_seconds: opts.replayerDuration,
+      process_started_at: replayer.startedAtWall,
+      process_exit_at: replayerExitInfo.exitedAtWall,
+      exit_code: replayerExitInfo.code,
+      exit_signal: replayerExitInfo.signal,
+      actual_process_runtime_ms: replayerExitInfo.exitedAtPerf - replayer.startedAtPerf,
+    };
+    raw.metrics.replayer_total_runtime_ms = raw.replayer_process.actual_process_runtime_ms;
     raw.metrics.replayer_events_posted_after_query_registration = Math.max(0, counters.posted - queryRegisterPostedCount);
     raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);
     attachMetricDefinitions(raw);
@@ -1306,6 +1436,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.log_markers_found = findLogMarkers(panda.logFile, scenario.required_log_markers);
     raw.status = 'complete';
     raw.completed_at = isoNow();
+    raw.validation_warnings = buildValidationWarnings(raw);
     raw.output_check = validateOutput(raw, scenario, counters);
     writeJson(rawPath, raw);
     if (!raw.output_check.passed) {
@@ -1317,7 +1448,8 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.status = 'failed';
     raw.completed_at = isoNow();
     raw.error = error?.stack || String(error);
-    raw.metrics.replayer_total_runtime_ms = raw.metrics.replayer_total_runtime_ms || (performance.now() - runStartedAt);
+    raw.metrics.replayer_total_runtime_ms = raw.metrics.replayer_total_runtime_ms || (performance.now() - (replayer?.startedAtPerf || runStartedAt));
+    raw.validation_warnings = buildValidationWarnings(raw);
     attachMetricDefinitions(raw);
     raw.output_check = { passed: false, details: { error: String(error?.message || error) } };
     writeJson(failurePath, raw);
@@ -1345,6 +1477,85 @@ function findLogMarkers(logFile, markers) {
   return markers.filter((marker) => text.includes(marker));
 }
 
+function extractServerQueryMetadata(queryResult) {
+  const timing = queryResult?.ack?.benchmark_timing || queryResult?.message?.benchmark_timing || null;
+  return {
+    registeredQuery: timing?.registered_query || null,
+    parsedWindows: Array.isArray(timing?.parsed_rspql_windows) ? timing.parsed_rspql_windows : null,
+    windowParameterUnit: timing?.rsp_window_parameter_unit || null,
+  };
+}
+
+function buildRunIsolationEvidence(metrics) {
+  const currentRunAdded = metrics?.rsp_events_added_with_current_benchmark_run_id_count ?? null;
+  const missingRunAdded = metrics?.rsp_events_added_without_benchmark_run_id_count ?? null;
+  const otherRunAdded = metrics?.rsp_events_added_with_other_benchmark_run_id_count ?? null;
+  const acceptedResultBuiltOnlyFromCurrentRunEvents = currentRunAdded !== null
+    && currentRunAdded > 0
+    && (missingRunAdded ?? 0) === 0
+    && (otherRunAdded ?? 0) === 0;
+
+  return {
+    source_events_with_benchmark_run_id_count: metrics?.source_events_with_current_benchmark_run_id_count ?? null,
+    source_events_without_benchmark_run_id_count: metrics?.source_events_without_benchmark_run_id_count ?? null,
+    source_events_with_other_benchmark_run_id_count: metrics?.source_events_with_other_benchmark_run_id_count ?? null,
+    rsp_events_added_with_benchmark_run_id_count: currentRunAdded,
+    rsp_events_added_without_benchmark_run_id_count: missingRunAdded,
+    rsp_events_added_with_other_benchmark_run_id_count: otherRunAdded,
+    accepted_result_built_only_from_current_run_events: acceptedResultBuiltOnlyFromCurrentRunEvents,
+  };
+}
+
+function buildValidationWarnings(raw) {
+  const warnings = [];
+  const runtimeDeltaMs = Number.isFinite(raw?.metrics?.replayer_total_runtime_ms)
+    ? Math.abs(raw.metrics.replayer_total_runtime_ms - raw.replayer_duration_seconds * 1000)
+    : null;
+  if (runtimeDeltaMs !== null && runtimeDeltaMs > 10_000) {
+    warnings.push({
+      code: 'replayer_runtime_mismatch',
+      message: 'replayer_total_runtime_ms differs from requested duration by more than 10 seconds.',
+      requested_duration_ms: raw.replayer_duration_seconds * 1000,
+      actual_runtime_ms: raw.metrics.replayer_total_runtime_ms,
+    });
+  }
+
+  const firstWindow = Array.isArray(raw.parsed_rspql_windows) ? raw.parsed_rspql_windows[0] : null;
+  if (firstWindow && firstWindow.width === firstWindow.slide && (raw.early_result_ignored_reasons_summary?.partial_window || 0) > 0) {
+    warnings.push({
+      code: 'early_partial_result_with_equal_range_step',
+      message: 'Observed an early partial result even though RANGE equals STEP.',
+      parsed_range: firstWindow.width,
+      parsed_step: firstWindow.slide,
+      first_any_result_event_time_span_ms: raw.rsp_first_any_result_event_time_span_ms ?? null,
+    });
+  }
+
+  if (Number.isFinite(raw?.metrics?.rdf_quads_parsed_count) && raw.metrics.rdf_quads_parsed_count > 10_000) {
+    warnings.push({
+      code: 'rdf_quads_parsed_count_high',
+      message: 'rdf_quads_parsed_count is much higher than the typical smoke-run baseline.',
+      rdf_quads_parsed_count: raw.metrics.rdf_quads_parsed_count,
+    });
+  }
+
+  if (!raw.registered_query) {
+    warnings.push({
+      code: 'registered_query_missing',
+      message: 'registered_query is missing from the raw result.',
+    });
+  }
+
+  if (!firstWindow) {
+    warnings.push({
+      code: 'parsed_range_step_missing',
+      message: 'Parsed RANGE/STEP metadata is missing from the raw result.',
+    });
+  }
+
+  return warnings;
+}
+
 function safeGitCommit() {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -1356,7 +1567,10 @@ function safeGitCommit() {
 function loadScenarios(opts) {
   return fs.readdirSync(SCENARIO_DIR)
     .filter((file) => file.endsWith('.json'))
-    .map((file) => readJson(path.join(SCENARIO_DIR, file)))
+    .map((file) => ({
+      ...readJson(path.join(SCENARIO_DIR, file)),
+      __scenario_file: path.join(SCENARIO_DIR, file),
+    }))
     .filter((scenario) => !opts.onlyScenario || scenario.scenario_id === opts.onlyScenario);
 }
 

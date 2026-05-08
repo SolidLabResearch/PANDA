@@ -8,9 +8,19 @@ export type BenchmarkUmaTiming = {
     total_uma_grant_ms?: number;
 };
 
+export type BenchmarkParsedWindowDefinition = {
+    window_name: string;
+    stream_name: string;
+    width: number;
+    slide: number;
+};
+
 export type BenchmarkTimingSnapshot = {
     correlation_id: string;
     benchmark_run_id?: string;
+    registered_query?: string;
+    parsed_rspql_windows?: BenchmarkParsedWindowDefinition[];
+    rsp_window_parameter_unit?: string;
     server_received_at_ns?: string;
     query_registered_at_ns?: string;
     rsp_subscription_started_at_ns?: string;
@@ -38,6 +48,12 @@ export type BenchmarkServerMetrics = {
     rsp_stream_event_count_after_query_registration?: number;
     rsp_first_event_timestamp_ms?: number;
     rsp_last_event_timestamp_ms?: number;
+    source_events_with_current_benchmark_run_id_count?: number;
+    source_events_without_benchmark_run_id_count?: number;
+    source_events_with_other_benchmark_run_id_count?: number;
+    rsp_events_added_with_current_benchmark_run_id_count?: number;
+    rsp_events_added_without_benchmark_run_id_count?: number;
+    rsp_events_added_with_other_benchmark_run_id_count?: number;
     rsp_query_eval_ms?: number;
     first_result_emit_ms?: number;
 };
@@ -57,6 +73,18 @@ export type BenchmarkTimingContext = {
     eventAddDurationsMs: number[];
     firstResultEmitStartedAtMs?: number;
 };
+
+type BenchmarkTimingNsKey =
+    | 'server_received_at_ns'
+    | 'query_registered_at_ns'
+    | 'rsp_subscription_started_at_ns'
+    | 'first_stream_event_at_ns'
+    | 'first_stream_event_added_at_ns'
+    | 'rsp_window_evaluated_at_ns'
+    | 'first_result_emitted_at_ns'
+    | 'rule_eval_started_at_ns'
+    | 'rule_eval_finished_at_ns'
+    | 'server_sent_at_ns';
 
 export function isBenchmarkTimingEnabled(): boolean {
     return process.env.BENCHMARK_TIMING === '1';
@@ -97,7 +125,7 @@ export function createBenchmarkTimingContext(correlationId: string, benchmarkRun
 
 export function maybeMarkBenchmarkNs(
     context: BenchmarkTimingContext | undefined,
-    key: keyof Omit<BenchmarkTimingSnapshot, 'correlation_id' | 'uma'>,
+    key: BenchmarkTimingNsKey,
     onlyFirst = false,
 ): void {
     if (!context?.enabled) {
@@ -117,9 +145,23 @@ export function cloneBenchmarkTiming(
     }
     return {
         ...context.serverTiming,
+        parsed_rspql_windows: context.serverTiming.parsed_rspql_windows?.map((window) => ({ ...window })),
         uma: context.serverTiming.uma ? { ...context.serverTiming.uma } : undefined,
         metrics: context.serverTiming.metrics ? { ...context.serverTiming.metrics } : undefined,
     };
+}
+
+export function setBenchmarkQueryDetails(
+    context: BenchmarkTimingContext | undefined,
+    query: string,
+    windows: BenchmarkParsedWindowDefinition[],
+): void {
+    if (!context?.enabled) {
+        return;
+    }
+    context.serverTiming.registered_query = query;
+    context.serverTiming.parsed_rspql_windows = windows.map((window) => ({ ...window }));
+    context.serverTiming.rsp_window_parameter_unit = 'milliseconds';
 }
 
 export function addBenchmarkMetric(

@@ -10,6 +10,8 @@ const DF = new DataFactory();
 import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
 
+type BenchmarkRunClassification = 'current' | 'other' | 'missing';
+
 /**
  * The NotificationStreamProcessor class is responsible for processing the notifications from the LDES Stream.
  * @class NotificationStreamProcessor
@@ -146,6 +148,8 @@ export class NotificationStreamProcessor {
             }
             const parsed_quads = latest_event_store.getQuads(null, null, null, null);
             incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rdf_quads_parsed_count', parsed_quads.length);
+            const benchmarkRunClassification = this.classifyBenchmarkRunFromQuads(parsed_quads);
+            this.recordRunIsolationMetric('source', benchmarkRunClassification);
             console.log(`[VALIDATION][INGEST] parsed_quads_count stream=${this.ldes_stream} quad_count=${parsed_quads.length}`);
             parsed_quads.forEach((quad: any, index: number) => {
                 console.log(`[VALIDATION][INGEST] parsed_quad index=${index} subject=${quad.subject.value} predicate=${quad.predicate.value} object=${quad.object.value} object_termType=${quad.object.termType} object_datatype=${quad.object.datatype?.value ?? ''}`);
@@ -180,6 +184,7 @@ export class NotificationStreamProcessor {
             console.log(`[VALIDATION][INGEST] timestamp_extracted stream=${this.ldes_stream} event_timestamp_literal=${timestamp} event_timestamp_epoch=${timestamp_epoch}`);
             if (this.stream_name) {
                 recordRspStreamEventTimestamp(this.auditContext?.benchmarkTiming, timestamp_epoch);
+                this.recordRunIsolationMetric('rsp_added', benchmarkRunClassification);
                 console.log(`[VALIDATION][INGEST] stream_add_decision event_id=${eventId} will_call_stream_add=true stream_name=${this.stream_name.name} quad_count=${parsed_quads.length}`);
                 this.logger.info({}, 'latest_event_received_preprocessing_completed_adding_to_rsp_engine_started');
                 console.log(`Adding the event store to the RSP Engine for the stream ${this.stream_name}`);
@@ -254,6 +259,47 @@ export class NotificationStreamProcessor {
         } catch {
             return undefined;
         }
+    }
+
+    private classifyBenchmarkRunFromQuads(quads: any[]): BenchmarkRunClassification {
+        const currentRunId = this.auditContext?.benchmarkTiming?.benchmarkRunId;
+        if (!currentRunId) {
+            return 'missing';
+        }
+
+        let sawBenchmarkMarker = false;
+        for (const quad of quads) {
+            const candidates = [
+                quad?.subject?.value,
+                quad?.object?.value,
+            ];
+            for (const candidate of candidates) {
+                if (typeof candidate !== 'string' || candidate.length === 0) {
+                    continue;
+                }
+                if (candidate.includes(currentRunId)) {
+                    return 'current';
+                }
+                if (candidate.includes('http://example.org/panda-benchmark/')) {
+                    sawBenchmarkMarker = true;
+                }
+            }
+        }
+
+        return sawBenchmarkMarker ? 'other' : 'missing';
+    }
+
+    private recordRunIsolationMetric(phase: 'source' | 'rsp_added', classification: BenchmarkRunClassification): void {
+        const prefix = phase === 'source' ? 'source_events' : 'rsp_events_added';
+        if (classification === 'current') {
+            incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, `${prefix}_with_current_benchmark_run_id_count` as any);
+            return;
+        }
+        if (classification === 'other') {
+            incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, `${prefix}_with_other_benchmark_run_id_count` as any);
+            return;
+        }
+        incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, `${prefix}_without_benchmark_run_id_count` as any);
     }
 }
 
