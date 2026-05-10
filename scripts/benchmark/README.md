@@ -227,6 +227,8 @@ export PANDA_UMA_ODRL_LOG_FILE="/absolute/path/to/panda/benchmark-results/uma-li
 npm run benchmark:uma-odrl:strict
 ```
 
+`scripts/uma/start_odrl_logged.sh` also honors `PANDA_UMA_ODRL_LOG_FILE` or `UMA_ODRL_LOG_FILE` if you want to pin the live CSS/UMA log to a specific absolute path. The protected benchmark runner reuses that path or the helper's `benchmark-results/uma-live-logs/latest-odrl-log.env`, and it fails before execution if the referenced file is missing or unreadable.
+
 Benchmark sibling-repo defaults (resolved from `<workspace>/PANDA`):
 
 - `RSP-JS`: `<workspace>/RSP-JS`
@@ -241,7 +243,30 @@ Override env vars:
 - `UMA_REPO`
 - `DERIVED_RESOURCES_REPO`
 
-The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing.
+The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing. The protected derived-anomaly benchmark applies the same requirement and archives a benchmark-facing link at `benchmark-results/uma-odrl-<benchmark-id>.log`.
+
+### Protected anomaly latency variants
+
+Keep these benchmark intents separate:
+
+- `00-live-window-query-baseline.json`: measures live-window query latency to the first accepted full-window websocket result. This isolates PANDA query registration, RSP window waiting, and websocket delivery without protected anomaly materialization.
+- Direct protected anomaly latency, if you keep a dedicated scenario for it: measures PANDA writing a protected anomaly alert and Alice reading it through UMA, but without requiring that the alert be gated by a full RSP window result.
+- `10-uma-replayer-panda-derived-anomaly-e2e.json`: measures the protected RSP-gated anomaly path. The benchmark registers the live query first, replays source SpO2 observations, waits for the current-run full-window RSP result, verifies PANDA materialized an alert with explicit `derivedFrom "rsp-query-result"` proof fields, and only then accepts Alice's UMA read of `http://localhost:3000/alice/derived/latest-anomaly`.
+
+For the protected RSP-gated scenario, the key latency metrics are:
+
+- `ws_connect_ms`
+- `query_registration_send_to_ack_ms`
+- `query_registration_to_first_rsp_output_ms`
+- `replayer_first_observation_write_ms`
+- `rsp_result_to_panda_anomaly_pod_write_ms`
+- `panda_anomaly_pod_write_total_ms`
+- `alice_latest_anomaly_uma_challenge_ms`
+- `alice_latest_anomaly_token_exchange_ms`
+- `alice_latest_anomaly_authorized_get_ms`
+- `alice_latest_anomaly_total_read_ms`
+- `end_to_end_replayer_to_rsp_output_ms`
+- `end_to_end_replayer_to_alice_latest_anomaly_ms`
 
 ### Scenario matrix runner
 

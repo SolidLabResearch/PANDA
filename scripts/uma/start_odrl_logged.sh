@@ -8,7 +8,7 @@ UMA_DIR="${PANDA_UMA_REPO_DIR:-$WORKSPACE_DIR/user-managed-access}"
 LOG_ROOT="${PANDA_UMA_LOG_DIR:-$PANDA_DIR/benchmark-results/uma-live-logs}"
 WAIT_SECONDS="${PANDA_UMA_START_WAIT_SECONDS:-120}"
 SEED_DERIVED="${PANDA_UMA_SEED_DERIVED:-true}"
-CLEAR_STATE="${PANDA_UMA_CLEAR_STATE:-true}"
+CLEAR_STATE="${PANDA_UMA_CLEAR_STATE:-false}"
 CSS_STATE_REL="${PANDA_UMA_CSS_STATE_DIR_REL:-packages/css/tmp-file-backed}"
 UMA_STATE_REL="${PANDA_UMA_UMA_STATE_DIR_REL:-packages/uma/tmp-file-backed}"
 USE_PAT_INIT="${PANDA_UMA_USE_PAT_INIT:-false}"
@@ -21,20 +21,30 @@ fi
 
 mkdir -p "$LOG_ROOT"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
-LOG_FILE="$LOG_ROOT/uma-odrl-$TIMESTAMP.log"
+REQUESTED_LOG_FILE="${PANDA_UMA_ODRL_LOG_FILE:-${UMA_ODRL_LOG_FILE:-}}"
+if [[ -n "$REQUESTED_LOG_FILE" ]]; then
+  case "$REQUESTED_LOG_FILE" in
+    /*) LOG_FILE="$REQUESTED_LOG_FILE" ;;
+    *) LOG_FILE="$PANDA_DIR/$REQUESTED_LOG_FILE" ;;
+  esac
+else
+  LOG_FILE="$LOG_ROOT/uma-odrl-$TIMESTAMP.log"
+fi
 LATEST_LINK="$LOG_ROOT/latest.log"
 ENV_FILE="$LOG_ROOT/latest-odrl-log.env"
 PID_FILE="$LOG_ROOT/latest.pid"
 CSS_STATE_PATH="$UMA_DIR/$CSS_STATE_REL"
 UMA_STATE_PATH="$UMA_DIR/$UMA_STATE_REL"
 if [[ "$USE_PAT_INIT" == "true" ]]; then
-  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json ./config/init-pat.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
+  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/default.json ./config/init-pat.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
 else
-  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
+  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/default.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
 fi
 
+mkdir -p "$(dirname "$LOG_FILE")"
 ln -sfn "$LOG_FILE" "$LATEST_LINK"
 printf 'export PANDA_UMA_ODRL_LOG_FILE="%s"\n' "$LOG_FILE" > "$ENV_FILE"
+printf 'export UMA_ODRL_LOG_FILE="%s"\n' "$LOG_FILE" >> "$ENV_FILE"
 
 wait_for_stack() {
   local ready_as=0

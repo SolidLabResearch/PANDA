@@ -25,6 +25,7 @@ export class AggregatorInstantiator {
     private static readonly LOW_SPO2_THRESHOLD = 90;
     private static readonly ALERT_CONTAINER = 'http://localhost:3000/alice/derived/anomaly-alert/';
     private static readonly ALERT_PREFIX = 'http://example.org/alert#';
+    private static readonly ALERT_NS_PREFIX = 'https://example.org/ns#';
     private static readonly XSD_PREFIX = 'http://www.w3.org/2001/XMLSchema#';
     private static readonly ALICE_ALERT_WRITE_TOKEN_ENV = 'PANDA_ALICE_WRITE_TOKEN';
     private static readonly UMA_TICKET_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:uma-ticket';
@@ -195,7 +196,13 @@ export class AggregatorInstantiator {
                             console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                             if (inferredAlert) {
                                 console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
-                                await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                                await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2, {
+                                    benchmarkRunId: this.auditContext?.benchmarkTiming?.benchmarkRunId,
+                                    rspQueryHash: this.hash_string,
+                                    rspWindowStartIso: new Date(window_timestamp_from).toISOString(),
+                                    rspWindowEndIso: new Date(window_timestamp_to).toISOString(),
+                                    rspResultTimestampIso: new Date(evaluation_now).toISOString(),
+                                });
                             }
                             this.recordFirstResultEmitDuration();
                             const aggregation_object: aggregation_object = {
@@ -232,7 +239,13 @@ export class AggregatorInstantiator {
                         console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                         if (inferredAlert) {
                             console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
-                            await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                            await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2, {
+                                benchmarkRunId: this.auditContext?.benchmarkTiming?.benchmarkRunId,
+                                rspQueryHash: this.hash_string,
+                                rspWindowStartIso: new Date(window_timestamp_from).toISOString(),
+                                rspWindowEndIso: new Date(window_timestamp_to).toISOString(),
+                                rspResultTimestampIso: new Date(evaluation_now).toISOString(),
+                            });
                         }
                         this.recordFirstResultEmitDuration();
                         const aggregation_object: aggregation_object = {
@@ -838,23 +851,54 @@ export class AggregatorInstantiator {
         this.alertContainerInitialized = setupResponse.ok || setupResponse.status === 409 || setupResponse.status === 412;
     }
 
-    private async materializeLowSpo2Alert(sourceEventUri: string | undefined, spo2Value: number): Promise<void> {
+    private async materializeLowSpo2Alert(sourceEventUri: string | undefined, spo2Value: number, rspProof: RspDerivedAlertProof): Promise<void> {
         await this.ensureAlertContainerReady();
         const eventId = sourceEventUri ?? 'unknown';
+        const benchmarkRunMarker = rspProof.benchmarkRunId ?? this.extractBenchmarkRunMarker(sourceEventUri);
+        const writeStartedAt = performance.now();
         console.log(`[MEASURE][ALERT] write_start timestamp=${new Date().toISOString()} event_id=${eventId}`);
-        const processingTimestamp = new Date().toISOString();
+        const processingTimestampDate = new Date();
+        const processingTimestamp = processingTimestampDate.toISOString();
+        const processingTimestampEpoch = processingTimestampDate.getTime();
         const sourcePart = sourceEventUri && sourceEventUri.startsWith('http')
             ? `<${sourceEventUri}>`
             : `"${(sourceEventUri ?? 'unknown').replace(/"/g, '\\"')}"`;
+        const alertId = `test-alert-${processingTimestampEpoch}-${hash_string_md5(`${sourceEventUri ?? 'unknown'}|${spo2Value}|${processingTimestamp}`)}`;
+        const slug = `${alertId}.ttl`;
+        const intendedAlertResourceUrl = new URL(slug, AggregatorInstantiator.ALERT_CONTAINER).toString();
+        const escapedBenchmarkRunMarker = benchmarkRunMarker ? benchmarkRunMarker.replace(/"/g, '\\"') : null;
+        const escapedSourceEventLiteral = (sourceEventUri ?? 'unknown').replace(/"/g, '\\"');
+        const escapedRspQueryHash = rspProof.rspQueryHash.replace(/"/g, '\\"');
+        const escapedRspWindowStart = rspProof.rspWindowStartIso.replace(/"/g, '\\"');
+        const escapedRspWindowEnd = rspProof.rspWindowEndIso.replace(/"/g, '\\"');
+        const escapedRspResultTimestamp = rspProof.rspResultTimestampIso.replace(/"/g, '\\"');
         const alertBody = `@prefix alert: <${AggregatorInstantiator.ALERT_PREFIX}> .
+@prefix ex: <${AggregatorInstantiator.ALERT_NS_PREFIX}> .
 @prefix xsd: <${AggregatorInstantiator.XSD_PREFIX}> .
 
+<> ex:type "anomaly-alert" ;
+   ex:alertId "${alertId}" ;
+   ex:severity "high" ;
+   ex:derivedFrom "rsp-query-result" ;
+   ex:rspQueryHash "${escapedRspQueryHash}" ;
+   ex:rspWindowStart "${escapedRspWindowStart}"^^xsd:dateTime ;
+   ex:rspWindowEnd "${escapedRspWindowEnd}"^^xsd:dateTime ;
+   ex:rspResultTimestamp "${escapedRspResultTimestamp}"^^xsd:dateTime ;
+   ex:sourceEventId ${sourcePart} ;
+   ex:sourceEventText "${escapedSourceEventLiteral}" ;
+   ex:observedValue "${spo2Value}"^^xsd:decimal ;
+   ex:processedAt "${processingTimestamp}"^^xsd:dateTime${escapedBenchmarkRunMarker ? ` ;\n   ex:benchmarkRunId "${escapedBenchmarkRunMarker}"` : ''} .
+
 <> a alert:LowValueDetected ;
+   alert:derivedFrom "rsp-query-result" ;
+   alert:rspQueryHash "${escapedRspQueryHash}" ;
+   alert:rspWindowStart "${escapedRspWindowStart}"^^xsd:dateTime ;
+   alert:rspWindowEnd "${escapedRspWindowEnd}"^^xsd:dateTime ;
+   alert:rspResultTimestamp "${escapedRspResultTimestamp}"^^xsd:dateTime ;
    alert:sourceEvent ${sourcePart} ;
    alert:observedValue "${spo2Value}"^^xsd:decimal ;
-   alert:processedAt "${processingTimestamp}"^^xsd:dateTime .
+   alert:processedAt "${processingTimestamp}"^^xsd:dateTime${escapedBenchmarkRunMarker ? ` ;\n   alert:benchmarkRunId "${escapedBenchmarkRunMarker}"` : ''} .
 `;
-        const slug = `low-spo2-${hash_string_md5(`${sourceEventUri ?? 'unknown'}|${spo2Value}`)}`;
         const alertAuthorization = await this.resolveAlertWriteAuthorizationHeader();
         const writeHeaders: Record<string, string> = {
             'Content-Type': 'text/turtle',
@@ -881,13 +925,25 @@ export class AggregatorInstantiator {
         }
         this.logAlertHttpRequestTrace(AggregatorInstantiator.ALERT_CONTAINER, 'POST', writeHeaders);
         console.log(`[VALIDATION][ALERT] write_request_sent event_id=${eventId} timestamp=${new Date().toISOString()}`);
-        console.log(`[VALIDATION][ALERT][WRITE_REQUEST] event_id=${eventId} url=${AggregatorInstantiator.ALERT_CONTAINER} method=POST header_keys=${Object.keys(writeHeaders).sort().join(',')} authorization_present=${Boolean(writeHeaders.Authorization)} token_expired=${tokenExpired}`);
+        console.log(`[VALIDATION][ALERT][WRITE_REQUEST] event_id=${eventId} url=${AggregatorInstantiator.ALERT_CONTAINER} target_resource=${intendedAlertResourceUrl} method=POST header_keys=${Object.keys(writeHeaders).sort().join(',')} authorization_present=${Boolean(writeHeaders.Authorization)} token_expired=${tokenExpired} benchmark_run_marker=${benchmarkRunMarker ?? 'none'}`);
+        console.log(`[VALIDATION][ALERT][RSP_PROOF] event_id=${eventId} benchmark_run_id=${benchmarkRunMarker ?? 'none'} derived_from=rsp-query-result rsp_query_hash=${rspProof.rspQueryHash} rsp_window_start=${rspProof.rspWindowStartIso} rsp_window_end=${rspProof.rspWindowEndIso} rsp_result_timestamp=${rspProof.rspResultTimestampIso}`);
+        console.log(`[VALIDATION][ALERT] benchmark_source_observation event_id=${eventId} benchmark_run_marker=${benchmarkRunMarker ?? 'none'} observed_value=${spo2Value}`);
+        const sendAlertWrite = async (headers: Record<string, string>) => fetch(AggregatorInstantiator.ALERT_CONTAINER, {
+            method: 'POST',
+            headers,
+            body: alertBody,
+        });
         try {
-            const writeResponse = await fetch(AggregatorInstantiator.ALERT_CONTAINER, {
-                method: 'POST',
-                headers: writeHeaders,
-                body: alertBody,
-            });
+            let writeResponse = await sendAlertWrite(writeHeaders);
+            if ((writeResponse.status === 401 || writeResponse.status === 403) && this.fallbackAlertWriteAuthorizationHeader) {
+                console.log(`[VALIDATION][ALERT][WRITE_RETRY] event_id=${eventId} status=${writeResponse.status} reason=authorization_rejected_refreshing_fallback_token`);
+                this.fallbackAlertWriteAuthorizationHeader = null;
+                const retriedAuthorization = await this.resolveAlertWriteAuthorizationHeader();
+                if (retriedAuthorization) {
+                    writeHeaders.Authorization = retriedAuthorization;
+                    writeResponse = await sendAlertWrite(writeHeaders);
+                }
+            }
             console.log(`[VALIDATION][ALERT] write_response_received event_id=${eventId} timestamp=${new Date().toISOString()} status=${writeResponse.status}`);
             const responseBody = await writeResponse.text().catch(() => '');
             const locationHeader = writeResponse.headers.get('location') ?? '';
@@ -896,8 +952,10 @@ export class AggregatorInstantiator {
             const writtenResource = locationHeader || null;
             if (writeResponse.ok && writtenResource) {
                 console.log(`[MEASURE][ALERT] write_success timestamp=${new Date().toISOString()} event_id=${eventId} resource=${writtenResource}`);
+                addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'panda_anomaly_write_ms' as any, performance.now() - writeStartedAt);
             } else if (writeResponse.ok) {
                 console.log(`[MEASURE][ALERT] write_success timestamp=${new Date().toISOString()} event_id=${eventId} resource=${AggregatorInstantiator.ALERT_CONTAINER}`);
+                addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'panda_anomaly_write_ms' as any, performance.now() - writeStartedAt);
             } else {
                 console.log(`[VALIDATION][ALERT][WRITE_ERROR] event_id=${eventId} status=${writeResponse.status} location=${locationHeader || 'none'} message=${JSON.stringify(responseBody)}`);
             }
@@ -908,6 +966,29 @@ export class AggregatorInstantiator {
         }
     }
 
+    private extractBenchmarkRunMarker(sourceEventUri: string | undefined): string | null {
+        if (!sourceEventUri) {
+            return null;
+        }
+        const explicitRunMatch = sourceEventUri.match(/\/panda-benchmark\/(.+?)\/spo2\/[^/]+$/);
+        if (explicitRunMatch?.[1]) {
+            return explicitRunMatch[1];
+        }
+        const sourceEventIdMatch = sourceEventUri.match(/source_event_id=([^&#]+)/i);
+        if (sourceEventIdMatch?.[1]) {
+            return decodeURIComponent(sourceEventIdMatch[1]);
+        }
+        return null;
+    }
+
+}
+
+type RspDerivedAlertProof = {
+    benchmarkRunId?: string;
+    rspQueryHash: string;
+    rspWindowStartIso: string;
+    rspWindowEndIso: string;
+    rspResultTimestampIso: string;
 }
 
 type QueryExecutionAuditContext = {

@@ -83,36 +83,69 @@ function makeObservation(runId, index) {
   ].join('\n');
 }
 
+async function authorizedPost(url, body, token) {
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/turtle',
+      Authorization: `${token.token_type || 'Bearer'} ${token.access_token}`,
+    },
+    body,
+  });
+}
+
 async function postWithUma(url, body, state) {
+  const totalStartedAt = performance.now();
   const headers = {
     'Content-Type': 'text/turtle',
   };
   if (state.token) {
     headers.Authorization = `${state.token.token_type || 'Bearer'} ${state.token.access_token}`;
   }
+  const challengeStartedAt = performance.now();
   let response = await fetch(url, { method: 'POST', headers, body });
+  const challengeMs = performance.now() - challengeStartedAt;
   if (response.ok) {
-    return { status: response.status, location: response.headers.get('Location') || response.headers.get('location') || '' };
+    return {
+      status: response.status,
+      location: response.headers.get('Location') || response.headers.get('location') || '',
+      umaChallengeObserved: false,
+      challengeMs,
+      tokenExchangeMs: null,
+      authorizedRequestMs: challengeMs,
+      totalMs: performance.now() - totalStartedAt,
+    };
   }
   if (response.status !== 401 && response.status !== 403) {
     const text = await response.text().catch(() => '');
     throw new Error(`POST failed status=${response.status} body=${text}`);
   }
   const challenge = parseAuthenticateHeader(response.headers.get('WWW-Authenticate'));
+  const tokenStartedAt = performance.now();
   state.token = await exchangeToken(challenge.tokenEndpoint, challenge.ticket, state.claimToken);
-  response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/turtle',
-      Authorization: `${state.token.token_type || 'Bearer'} ${state.token.access_token}`,
-    },
-    body,
-  });
+  const tokenExchangeMs = performance.now() - tokenStartedAt;
+  const authorizedStartedAt = performance.now();
+  response = await authorizedPost(url, body, state.token);
+  const authorizedRequestMs = performance.now() - authorizedStartedAt;
+  if ((response.status === 401 || response.status === 403) && state.token) {
+    state.token = null;
+    const text = await response.text().catch(() => '');
+    console.warn(`[BENCHMARK_REPLAYER] authorized_retry_invalidated status=${response.status} body=${text}`);
+    return postWithUma(url, body, state);
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new Error(`Authorized POST failed status=${response.status} body=${text}`);
   }
-  return { status: response.status, location: response.headers.get('Location') || response.headers.get('location') || '' };
+  return {
+    status: response.status,
+    location: response.headers.get('Location') || response.headers.get('location') || '',
+    umaChallengeObserved: true,
+    challengeMs,
+    tokenExchangeMs,
+    authorizedRequestMs,
+    totalMs: performance.now() - totalStartedAt,
+  };
 }
 
 async function notifyPanda(pandaWebhookUrl, topic, target, runId, count, data) {
@@ -151,7 +184,7 @@ async function main() {
     posted += 1;
     const target = postResult.location ? new URL(postResult.location, opts.url).toString() : opts.url;
     await notifyPanda(opts.pandaWebhookUrl, opts.url, target, opts.benchmarkRunId, posted, payload);
-    console.log(`[BENCHMARK_REPLAYER] event_posted benchmark_run_id=${opts.benchmarkRunId} count=${posted} status=${postResult.status} target=${target} timestamp=${new Date().toISOString()}`);
+    console.log(`[BENCHMARK_REPLAYER] event_posted benchmark_run_id=${opts.benchmarkRunId} count=${posted} status=${postResult.status} target=${target} uma_challenge_observed=${postResult.umaChallengeObserved} challenge_ms=${postResult.challengeMs.toFixed(3)} token_exchange_ms=${postResult.tokenExchangeMs === null ? 'null' : postResult.tokenExchangeMs.toFixed(3)} authorized_request_ms=${postResult.authorizedRequestMs.toFixed(3)} total_ms=${postResult.totalMs.toFixed(3)} timestamp=${new Date().toISOString()}`);
     const elapsed = performance.now() - eventStartedAt;
     await sleep(Math.max(0, opts.intervalMs - elapsed));
   }

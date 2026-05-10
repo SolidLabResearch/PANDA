@@ -1,0 +1,32 @@
+{
+  "scenario_id": "uma-replayer-panda-derived-anomaly-e2e",
+  "scenario_type": "uma_replayer_panda_derived_anomaly_e2e",
+  "description": "Protected RSP-gated flow: Replayer writes source SpO2 to Alice's Pod, PANDA waits for the live 60s RSP window result, materializes the derived anomaly alert, and Alice reads latest-anomaly through UMA.",
+  "completion_condition": "alice_latest_anomaly_uma_read",
+  "require_panda_websocket_result": true,
+  "query_window_seconds": 60,
+  "replayer_duration_seconds": 75,
+  "query_registration_delay_after_replayer_start_seconds": 0,
+  "target_css_resources": {
+    "stream_container_url": "http://localhost:3000/alice/spo2/",
+    "derived_latest_url": "http://localhost:3000/alice/derived/latest-anomaly",
+    "alert_container_url": "http://localhost:3000/alice/derived/anomaly-alert/"
+  },
+  "policy_meta_file_paths": [
+    "alice/derived/.meta"
+  ],
+  "panda_query_payload": {
+    "type": "live",
+    "actor_webid": "http://localhost:3000/alice/profile/card#me",
+    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT ?s ?spo2Value\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE {query_window_ms} STEP {query_window_ms}]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?spo2Value .\n  }\n}",
+    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" }. \n"
+  },
+  "replayer_command": "node scripts/benchmark/live_spo2_replayer.js --url http://localhost:3000/alice/spo2/ --duration {replayer_duration_seconds} --interval-ms 500 --benchmark-run-id {benchmark_run_id}",
+  "expected_decision": "allow",
+  "required_log_markers": [
+    "[BENCHMARK_REPLAYER] event_posted",
+    "[VALIDATION][RULE] inferred_alert_triple_present=true",
+    "[VALIDATION][ALERT][RSP_PROOF]",
+    "[MEASURE][ALERT] write_success"
+  ]
+}

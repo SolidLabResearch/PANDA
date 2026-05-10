@@ -3,6 +3,25 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const PREFERRED_METRIC_ORDER = [
+  'ws_connect_ms',
+  'query_registration_send_to_ack_ms',
+  'query_registration_to_first_rsp_output_ms',
+  'replayer_first_observation_write_ms',
+  'end_to_end_replayer_to_rsp_output_ms',
+  'rsp_output_to_panda_alert_write_start_ms',
+  'rsp_output_to_panda_alert_write_success_ms',
+  'panda_anomaly_pod_write_total_ms',
+  'panda_alert_write_success_to_alice_latest_read_start_ms',
+  'panda_alert_write_success_to_alice_latest_read_success_ms',
+  'alice_latest_read_poll_duration_ms',
+  'alice_latest_anomaly_uma_challenge_ms',
+  'alice_latest_anomaly_token_exchange_ms',
+  'alice_latest_anomaly_authorized_get_ms',
+  'alice_latest_anomaly_total_read_ms',
+  'rsp_output_to_alice_latest_anomaly_success_ms',
+  'end_to_end_replayer_to_alice_latest_anomaly_ms',
+];
 
 function parseArgs(argv) {
   const out = { benchmarkId: null };
@@ -112,6 +131,7 @@ function main() {
     benchmark_id: opts.benchmarkId,
     generated_at: new Date().toISOString(),
     complete_valid_runs: rows.length,
+    preferred_metric_order: PREFERRED_METRIC_ORDER.filter((metric) => Object.prototype.hasOwnProperty.call(metrics, metric)),
     metrics,
     warnings: {
       unavailable_metrics: Array.from(unavailableMetrics).sort(),

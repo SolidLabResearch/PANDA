@@ -1,4 +1,5 @@
 import { ContinuousAnomalyMonitoringService } from "./ContinuousAnomalyMonitoringService";
+import { AggregatorInstantiator } from "../aggregator/AggregatorInstantiator";
 const N3 = require('n3');
 
 test('infers expected standing triple for numeric value', async () => {
@@ -84,4 +85,12 @@ test('infers low SpO2 alert for xsd:float value 89', async () => {
 test('alert detection ignores unrelated alert substrings', () => {
     const unrelated = '<http://localhost:3000/alice/derived/anomaly-alert/test> <http://example.org/value> "94" .';
     expect(ContinuousAnomalyMonitoringService.outputContainsAlertTriple(unrelated)).toBe(false);
+});
+
+test('extracts benchmark run marker from benchmark source event uri', () => {
+    const marker = (AggregatorInstantiator.prototype as any).extractBenchmarkRunMarker.call(
+        {},
+        'http://example.org/panda-benchmark/uma-replayer-panda-derived-anomaly-e2e-1-abc123/spo2/11',
+    );
+    expect(marker).toBe('uma-replayer-panda-derived-anomaly-e2e-1-abc123');
 });

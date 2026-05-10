@@ -42,6 +42,57 @@ function validate(row) {
     if (!condition) failures.push(reason);
   };
 
+  if (row.scenario_id === 'uma-replayer-panda-derived-anomaly-e2e') {
+    requireCheck(row.status === 'complete', 'run is not complete');
+    requireCheck(row.output_check?.passed === true, 'output_check.passed is not true');
+    requireCheck(row.actor_proof?.replayer_wrote_spo2_observations === true, 'Replayer did not write SpO2 observations');
+    requireCheck(row.actor_proof?.replayer_write_through_uma === true, 'Replayer SpO2 write did not prove UMA');
+    requireCheck(row.actor_proof?.panda_registered_query === true, 'PANDA query registration proof is missing');
+    requireCheck(row.actor_proof?.current_run_rsp_output_observed === true, 'Current-run RSP output proof is missing');
+    requireCheck(row.actor_proof?.panda_wrote_anomaly_alerts === true, 'PANDA did not write anomaly alerts');
+    requireCheck(row.actor_proof?.alice_read_latest_anomaly === true, 'Alice did not read latest-anomaly');
+    requireCheck(isFiniteNumber(m.ws_connect_ms) && m.ws_connect_ms >= 0, 'ws_connect_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.query_registration_send_to_ack_ms) && m.query_registration_send_to_ack_ms >= 0, 'query_registration_send_to_ack_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.query_registration_to_first_rsp_output_ms) && m.query_registration_to_first_rsp_output_ms > 0, 'query_registration_to_first_rsp_output_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.replayer_first_observation_write_ms) && m.replayer_first_observation_write_ms > 0, 'replayer_first_observation_write_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.rsp_result_to_panda_anomaly_pod_write_ms) && m.rsp_result_to_panda_anomaly_pod_write_ms >= 0, 'rsp_result_to_panda_anomaly_pod_write_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.panda_anomaly_pod_write_total_ms) && m.panda_anomaly_pod_write_total_ms >= 0, 'panda_anomaly_pod_write_total_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.alice_latest_anomaly_total_read_ms) && m.alice_latest_anomaly_total_read_ms > 0, 'alice_latest_anomaly_total_read_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.end_to_end_replayer_to_rsp_output_ms) && m.end_to_end_replayer_to_rsp_output_ms > 0, 'end_to_end_replayer_to_rsp_output_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.end_to_end_replayer_to_alice_latest_anomaly_ms) && m.end_to_end_replayer_to_alice_latest_anomaly_ms > 0, 'end_to_end_replayer_to_alice_latest_anomaly_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.rsp_output_to_panda_alert_write_success_ms) && m.rsp_output_to_panda_alert_write_success_ms >= 0, 'rsp_output_to_panda_alert_write_success_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.panda_alert_write_success_to_alice_latest_read_success_ms) && m.panda_alert_write_success_to_alice_latest_read_success_ms >= 0, 'panda_alert_write_success_to_alice_latest_read_success_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.alice_latest_read_poll_duration_ms) && m.alice_latest_read_poll_duration_ms >= 0, 'alice_latest_read_poll_duration_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.rsp_output_to_alice_latest_anomaly_success_ms) && m.rsp_output_to_alice_latest_anomaly_success_ms > 0, 'rsp_output_to_alice_latest_anomaly_success_ms must exist and be > 0');
+    requireCheck((row.protected_resource_proof || []).length >= 4, 'protected resource proof must include all required targets');
+    requireCheck(!(row.protected_resource_proof || []).some((entry) => entry.status === 200), 'protected resource proof contains public HTTP 200');
+    requireCheck(typeof row.latest_anomaly_sample === 'string' && row.latest_anomaly_sample.includes(row.benchmark_run_id), 'latest-anomaly sample does not contain benchmark run id');
+    requireCheck(!/smoke-derived-anomaly-alert/i.test(row.latest_anomaly_sample || ''), 'latest-anomaly sample appears to be stale content from smoke-derived-anomaly-alert');
+    requireCheck(/derivedFrom[^\n]*"rsp-query-result"/i.test(row.latest_anomaly_sample || ''), 'latest-anomaly sample does not contain the RSP-derived marker');
+    requireCheck(/rspQueryHash/i.test(row.latest_anomaly_sample || ''), 'latest-anomaly sample does not contain rspQueryHash proof');
+    requireCheck(/rspWindowStart/i.test(row.latest_anomaly_sample || '') && /rspWindowEnd/i.test(row.latest_anomaly_sample || ''), 'latest-anomaly sample does not contain RSP window proof');
+    const rspQueryHashFromSample = (row.latest_anomaly_sample || '').match(/rspQueryHash["\s:]*([a-f0-9]+)/i)?.[1] || null;
+    if (typeof row.rsp_output_proof?.query_hash === 'string' && rspQueryHashFromSample) {
+      requireCheck(rspQueryHashFromSample === row.rsp_output_proof.query_hash, `latest-anomaly sample rspQueryHash (${rspQueryHashFromSample}) does not match the accepted RSP output query hash (${row.rsp_output_proof.query_hash})`);
+    }
+    requireCheck(row.latest_anomaly_diagnostics?.status_code === 200, 'Alice latest-anomaly HTTP status is not 200');
+    requireCheck(row.latest_anomaly_diagnostics?.rsp_proof_verified === true, 'Alice latest-anomaly RSP proof verification is missing');
+    requireCheck(row.rsp_output_proof?.benchmark_run_id === row.benchmark_run_id, 'Accepted RSP output benchmark run id does not match the current run');
+    requireCheck(typeof row.rsp_output_proof?.query_hash === 'string' && row.rsp_output_proof.query_hash.length > 0, 'Accepted RSP output query hash is missing');
+    requireCheck(row.alert_rsp_proof?.derived_from === 'rsp-query-result', 'PANDA alert log did not prove RSP-derived origin');
+    requireCheck(row.alert_rsp_proof?.benchmark_run_id === row.benchmark_run_id, 'PANDA alert log benchmark run id does not match the current run');
+    if (typeof row.rsp_output_proof?.query_hash === 'string') {
+      requireCheck(row.alert_rsp_proof?.rsp_query_hash === row.rsp_output_proof.query_hash, 'PANDA alert log query hash does not match the accepted RSP output');
+    }
+    requireCheck(row.log_proof?.validation_basis === 'live_log_growth_after_preflight', 'ODRL proof must come from live post-run log growth');
+    requireCheck(isFiniteNumber(row.log_proof?.live_growth_bytes) && row.log_proof.live_growth_bytes > 0, 'ODRL log live_growth_bytes must be > 0');
+    requireCheck(m.query_registration_to_first_rsp_output_ms >= row.query_window_seconds * 1000 * 0.8, 'query_registration_to_first_rsp_output_ms is too short for the configured RSP window');
+    for (const metric of Object.keys(m)) {
+      requireCheck(Boolean(definitions[metric]), `missing metric_definitions entry for ${metric}`);
+    }
+    return failures;
+  }
+
   requireCheck(row.status !== 'running', 'run is still marked running');
   requireCheck(row.status === 'complete', 'run is not complete');
   requireCheck(row.output_check?.passed === true, 'output_check.passed is not true');
