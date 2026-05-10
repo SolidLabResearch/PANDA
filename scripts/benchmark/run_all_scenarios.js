@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn, execFileSync } = require('child_process');
 const { randomUUID } = require('crypto');
 const { performance } = require('perf_hooks');
@@ -21,6 +22,9 @@ const UMA_DIR = resolveRepoPath({
   defaultPath: siblingDefaults.umaRepo,
 });
 const WS_PROTOCOL = 'solid-stream-aggregator-protocol';
+const PROC_STAT = '/proc/stat';
+const DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS = 500;
+const PAGE_SIZE_BYTES = 4096;
 
 function parseArgs(argv) {
   const out = {
@@ -36,6 +40,8 @@ function parseArgs(argv) {
     onlyScenario: null,
     benchmarkId: null,
     continueOnFailure: false,
+    collectResourceUsage: false,
+    resourceSampleIntervalMs: DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
@@ -52,11 +58,229 @@ function parseArgs(argv) {
     if (key === '--only-scenario') out.onlyScenario = next;
     if (key === '--benchmark-id') out.benchmarkId = next;
     if (key === '--continue-on-failure') out.continueOnFailure = true;
+    if (key === '--collect-resource-usage') out.collectResourceUsage = true;
+    if (key === '--resource-sample-interval-ms') out.resourceSampleIntervalMs = Number(next);
   }
   if (!out.benchmarkId) {
     out.benchmarkId = `panda-live-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   }
+  if (!Number.isFinite(out.resourceSampleIntervalMs) || out.resourceSampleIntervalMs < 100) {
+    out.resourceSampleIntervalMs = DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS;
+  }
   return out;
+}
+
+function readCpuTotalJiffies() {
+  const text = fs.readFileSync(PROC_STAT, 'utf8');
+  const first = text.split('\n')[0] || '';
+  const parts = first.trim().split(/\s+/);
+  if (parts[0] !== 'cpu') return null;
+  const total = parts.slice(1).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  return Number.isFinite(total) ? total : null;
+}
+
+function readProcStat(pid) {
+  const statText = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const closeParen = statText.lastIndexOf(')');
+  if (closeParen < 0) return null;
+  const rest = statText.slice(closeParen + 2).trim().split(/\s+/);
+  const utimeJiffies = Number(rest[11]);
+  const stimeJiffies = Number(rest[12]);
+  const rssPages = Number(rest[21]);
+  if (!Number.isFinite(utimeJiffies) || !Number.isFinite(stimeJiffies) || !Number.isFinite(rssPages)) {
+    return null;
+  }
+  return {
+    procJiffies: utimeJiffies + stimeJiffies,
+    rssBytes: Math.max(0, rssPages) * PAGE_SIZE_BYTES,
+  };
+}
+
+function discoverPidOnPort(port) {
+  try {
+    const output = execFileSync('lsof', ['-ti', `tcp:${port}`], { encoding: 'utf8' }).trim();
+    const pids = output ? output.split(/\s+/).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 1) : [];
+    return pids[0] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Check if a PID is live by verifying /proc/<pid> exists
+function isPidLive(pid) {
+  if (!Number.isFinite(pid) || pid <= 1) return false;
+  try {
+    fs.statSync(`/proc/${pid}`);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function createResourceSampler(config) {
+  const {
+    outFile,
+    intervalMs,
+    scenarioId,
+    runId,
+    benchmarkId,
+    phase,
+    trackedProcesses,
+    samplesPath,
+  } = config;
+  ensureDir(path.dirname(outFile));
+  const stream = fs.createWriteStream(outFile, { flags: 'a' });
+  const startedAtPerf = performance.now();
+  let timer = null;
+  let stopped = false;
+  let previousCpuTotalJiffies = null;
+  const previousProcJiffiesByPid = new Map();
+  // Track which PIDs have already emitted process_exit to avoid repeated emissions
+  const exitedPids = new Set();
+
+  const writeRow = (row) => {
+    try {
+      stream.write(`${JSON.stringify(row)}\n`);
+    } catch (_) {
+      // keep benchmark running if sample write fails
+    }
+  };
+
+  const sample = () => {
+    const timestampMs = Math.round(performance.now() - startedAtPerf);
+    let cpuTotalJiffies = null;
+    try {
+      cpuTotalJiffies = readCpuTotalJiffies();
+    } catch (_) {
+      cpuTotalJiffies = null;
+    }
+    for (const target of trackedProcesses) {
+      const base = {
+        timestamp_ms: timestampMs,
+        scenario_id: scenarioId,
+        run_id: runId,
+        phase,
+        label: target.label,
+        pid: Number.isFinite(target.pid) ? target.pid : null,
+      };
+      if (!Number.isFinite(target.pid)) {
+        // PID was never captured at sampler start; emit missing_pid only on first sample
+        if (timestampMs === 0) {
+          writeRow({ ...base, event: 'missing_pid' });
+        }
+        continue;
+      }
+      try {
+        const stat = readProcStat(target.pid);
+        if (!stat) {
+          // Process no longer available; emit process_exit only once
+          if (!exitedPids.has(target.pid)) {
+            exitedPids.add(target.pid);
+            writeRow({ ...base, event: 'process_exit' });
+          }
+          continue;
+        }
+        let cpuPercent = null;
+        const previousProc = previousProcJiffiesByPid.get(target.pid);
+        if (
+          Number.isFinite(cpuTotalJiffies)
+          && Number.isFinite(previousCpuTotalJiffies)
+          && Number.isFinite(previousProc)
+        ) {
+          const procDelta = stat.procJiffies - previousProc;
+          const totalDelta = cpuTotalJiffies - previousCpuTotalJiffies;
+          // Approximate process CPU% from Linux jiffy deltas:
+          // cpu_percent ≈ (process_delta_jiffies / system_total_delta_jiffies) * 100 * cpu_core_count
+          // This reports "one full core" as ~100%, and can exceed 100% on multi-core parallel work.
+          if (procDelta >= 0 && totalDelta > 0) {
+            const cores = os.cpus().length || 1;
+            cpuPercent = (procDelta / totalDelta) * 100 * cores;
+          }
+        }
+        previousProcJiffiesByPid.set(target.pid, stat.procJiffies);
+        writeRow({
+          ...base,
+          event: 'sample',
+          rss_bytes: stat.rssBytes,
+          heap_used_bytes: null,
+          heap_total_bytes: null,
+          cpu_percent: Number.isFinite(cpuPercent) ? cpuPercent : null,
+        });
+      } catch (error) {
+        if (error && error.code === 'ENOENT') {
+          // Process exited; emit only once
+          if (!exitedPids.has(target.pid)) {
+            exitedPids.add(target.pid);
+            writeRow({ ...base, event: 'process_exit' });
+          }
+        } else {
+          writeRow({ ...base, event: 'sample_error', error: String(error?.message || error) });
+        }
+      }
+    }
+    if (Number.isFinite(cpuTotalJiffies)) {
+      previousCpuTotalJiffies = cpuTotalJiffies;
+    }
+  };
+
+  return {
+    start() {
+      if (stopped) return;
+      
+      // Verify PIDs are live at startup
+      let liveCount = 0;
+      const initialStatus = trackedProcesses.map((target) => {
+        const isLive = Number.isFinite(target.pid) && isPidLive(target.pid);
+        if (isLive) liveCount += 1;
+        return {
+          label: target.label,
+          pid: target.pid,
+          is_live_at_start: isLive,
+        };
+      });
+      
+      // Warn if all tracked PIDs are missing/exited at sampler start
+      if (liveCount === 0) {
+        console.warn('[resource] WARNING: Resource collection started with no live tracked processes.');
+      }
+      
+      writeRow({
+        timestamp_ms: 0,
+        event: 'resource_collection_started',
+        benchmark_id: benchmarkId,
+        scenario_id: scenarioId,
+        run_id: runId,
+        phase,
+        sample_interval_ms: intervalMs,
+        tracked_processes: initialStatus,
+        samples_path: samplesPath,
+      });
+      sample();
+      timer = setInterval(sample, intervalMs);
+    },
+    stop(reason = 'scenario_end') {
+      if (stopped) return;
+      stopped = true;
+      if (timer) clearInterval(timer);
+      writeRow({
+        timestamp_ms: Math.round(performance.now() - startedAtPerf),
+        event: 'resource_collection_stopped',
+        reason,
+      });
+      stream.end();
+    },
+  };
+}
+
+function buildTrackedProcesses({ pandaPid, replayerPid }) {
+  const cssPid = discoverPidOnPort(3000);
+  const umaPid = discoverPidOnPort(4000);
+  return [
+    { label: 'panda_server', pid: Number.isFinite(pandaPid) ? pandaPid : null },
+    { label: 'css_solid_server', pid: Number.isFinite(cssPid) ? cssPid : null },
+    { label: 'uma_authorization_server', pid: Number.isFinite(umaPid) ? umaPid : null },
+    { label: 'stream_replayer', pid: Number.isFinite(replayerPid) ? replayerPid : null },
+  ];
 }
 
 function sleep(ms) {
@@ -1289,6 +1513,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     rsp_window_parameter_unit: null,
     run_isolation: null,
     replayer_process: null,
+    resource_usage: null,
     validation_warnings: [],
     sequence,
     metrics: {},
@@ -1307,6 +1532,9 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
   let queryRegisterPostedCount = 0;
   const runStartedAt = performance.now();
   let stopReplayerWatcher = () => {};
+  let resourceSampler = null;
+  const sampleDir = isWarmup ? path.join(runRoot, 'warmup', 'resource-samples') : path.join(runRoot, 'raw', 'resource-samples');
+  const resourceSampleFile = path.join(sampleDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.jsonl`);
   try {
     killPortsIfForced(opts.force, [3000, 4000, 8080]);
     await sleep(opts.force ? 2000 : 0);
@@ -1337,6 +1565,31 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     markEvent('replayer_start');
     sequence.replayer_started = isoNow();
     const replayerStartedAt = replayer.startedAtPerf;
+    if (opts.collectResourceUsage) {
+      const trackedProcesses = buildTrackedProcesses({
+        pandaPid: panda?.child?.pid,
+        replayerPid: replayer?.child?.pid,
+      });
+      const samplesPath = path.relative(ROOT, resourceSampleFile);
+      raw.resource_usage = {
+        enabled: true,
+        sample_interval_ms: opts.resourceSampleIntervalMs,
+        samples_path: samplesPath,
+        tracked_processes: trackedProcesses,
+      };
+      console.log(`[resource] start scenario=${scenario.scenario_id} run=${runId} phase=${phase} interval_ms=${opts.resourceSampleIntervalMs}`);
+      resourceSampler = createResourceSampler({
+        outFile: resourceSampleFile,
+        intervalMs: opts.resourceSampleIntervalMs,
+        benchmarkId: opts.benchmarkId,
+        scenarioId: scenario.scenario_id,
+        runId,
+        phase,
+        trackedProcesses,
+        samplesPath,
+      });
+      resourceSampler.start();
+    }
     await waitForReplayerActive(counters, 30000);
     const delayRemaining = opts.queryRegistrationDelay * 1000 - (performance.now() - replayerStartedAt);
     if (delayRemaining > 0) await sleep(delayRemaining);
@@ -1467,6 +1720,10 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     if (!opts.continueOnFailure) throw error;
     return raw;
   } finally {
+    if (resourceSampler) {
+      resourceSampler.stop(raw.status === 'complete' ? 'scenario_complete' : 'scenario_failed');
+      console.log(`[resource] stop scenario=${scenario.scenario_id} run=${runId} phase=${phase}`);
+    }
     stopReplayerWatcher();
     stopChild(replayer?.child);
     stopChild(panda?.child);
@@ -1563,7 +1820,139 @@ function buildValidationWarnings(raw) {
     });
   }
 
+  // Validate resource samples if collection was enabled
+  if (raw.resource_usage?.enabled && raw.status === 'complete') {
+    const samplesPath = raw.resource_usage?.samples_path;
+    if (samplesPath) {
+      const fullPath = path.join(ROOT, samplesPath);
+      const validation = validateResourceSamples(fullPath);
+      if (!validation.isValid) {
+        warnings.push({
+          code: 'resource_collection_produced_no_usable_samples',
+          message: validation.message,
+          samples_path: samplesPath,
+        });
+      }
+    }
+  }
+
   return warnings;
+}
+
+// Validate that a resource samples file contains actual sample data
+function validateResourceSamples(samplesPath) {
+  if (!fs.existsSync(samplesPath)) {
+    return { isValid: false, message: `Resource samples file does not exist at ${samplesPath}` };
+  }
+  
+  try {
+    const content = fs.readFileSync(samplesPath, 'utf8');
+    const lines = content.trim().split('\n').filter(line => line.length > 0);
+    
+    // Look for at least one actual sample record (event: 'sample') with rss_bytes
+    let foundUsableSample = false;
+    for (const line of lines) {
+      try {
+        const record = JSON.parse(line);
+        if (record.event === 'sample' && Number.isFinite(record.rss_bytes)) {
+          foundUsableSample = true;
+          break;
+        }
+      } catch (_) {
+        // Skip malformed lines
+      }
+    }
+    
+    if (!foundUsableSample) {
+      return { 
+        isValid: false, 
+        message: 'Resource samples file contains no usable sample records with rss_bytes' 
+      };
+    }
+    
+    return { isValid: true };
+  } catch (error) {
+    return { isValid: false, message: `Error reading resource samples file: ${error?.message || error}` };
+  }
+}
+
+// Parse and aggregate resource samples from a JSONL file
+function aggregateResourceSamples(samplesPath) {
+  const stats = {
+    total_records: 0,
+    sample_records: 0,
+    process_exit_records: 0,
+    missing_pid_records: 0,
+    error_records: 0,
+    by_label: {},
+  };
+  
+  if (!fs.existsSync(samplesPath)) {
+    return stats;
+  }
+  
+  try {
+    const content = fs.readFileSync(samplesPath, 'utf8');
+    const lines = content.trim().split('\n').filter(line => line.length > 0);
+    
+    for (const line of lines) {
+      try {
+        const record = JSON.parse(line);
+        stats.total_records += 1;
+        
+        const label = record.label;
+        if (!stats.by_label[label]) {
+          stats.by_label[label] = {
+            sample_count: 0,
+            rss_bytes_samples: [],
+            cpu_percent_samples: [],
+            exit_recorded: false,
+          };
+        }
+        
+        if (record.event === 'sample') {
+          stats.sample_records += 1;
+          stats.by_label[label].sample_count += 1;
+          if (Number.isFinite(record.rss_bytes)) {
+            stats.by_label[label].rss_bytes_samples.push(record.rss_bytes);
+          }
+          if (Number.isFinite(record.cpu_percent)) {
+            stats.by_label[label].cpu_percent_samples.push(record.cpu_percent);
+          }
+        } else if (record.event === 'process_exit') {
+          stats.process_exit_records += 1;
+          stats.by_label[label].exit_recorded = true;
+        } else if (record.event === 'missing_pid') {
+          stats.missing_pid_records += 1;
+        } else if (record.event === 'sample_error') {
+          stats.error_records += 1;
+        }
+      } catch (_) {
+        // Skip malformed lines
+      }
+    }
+    
+    // Compute summary statistics for each label
+    for (const label in stats.by_label) {
+      const labelStats = stats.by_label[label];
+      if (labelStats.rss_bytes_samples.length > 0) {
+        const samples = labelStats.rss_bytes_samples;
+        labelStats.rss_bytes_mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+        labelStats.rss_bytes_min = Math.min(...samples);
+        labelStats.rss_bytes_max = Math.max(...samples);
+      }
+      if (labelStats.cpu_percent_samples.length > 0) {
+        const samples = labelStats.cpu_percent_samples;
+        labelStats.cpu_percent_mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+        labelStats.cpu_percent_min = Math.min(...samples);
+        labelStats.cpu_percent_max = Math.max(...samples);
+      }
+    }
+  } catch (error) {
+    // Silently ignore errors during aggregation
+  }
+  
+  return stats;
 }
 
 function safeGitCommit() {
@@ -1649,6 +2038,8 @@ async function main() {
     warmup: opts.warmup,
     scenarios: scenarios.map((scenario) => scenario.scenario_id),
     runner_command: commandForDisplay('node', [path.relative(ROOT, __filename), ...process.argv.slice(2)]),
+    collect_resource_usage: opts.collectResourceUsage,
+    resource_sample_interval_ms: opts.resourceSampleIntervalMs,
   };
   writeJson(path.join(runRoot, 'manifest.json'), manifest);
   const ledger = [];

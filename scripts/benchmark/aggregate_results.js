@@ -47,6 +47,29 @@ function aggregateDebugFieldNames(row) {
   ) && isFiniteNumber(row[key]));
 }
 
+function sanitizeMetricLabel(label) {
+  return String(label || '')
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+function parseJsonLines(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const runRoot = path.join(ROOT, 'benchmarks', 'results', 'runs', opts.benchmarkId);
@@ -108,6 +131,66 @@ function main() {
     }
   }
 
+  const MB = 1024 * 1024;
+  const resourceByLabel = {};
+  const resourceWarnings = [];
+  for (const row of rows) {
+    const samplePathRelative = row?.resource_usage?.samples_path;
+    if (!samplePathRelative) {
+      resourceWarnings.push({
+        scenario_id: row.scenario_id,
+        run_id: row.run_id,
+        warning: 'resource_samples_missing_path',
+      });
+      continue;
+    }
+    const samplePath = path.join(ROOT, samplePathRelative);
+    if (!fs.existsSync(samplePath)) {
+      resourceWarnings.push({
+        scenario_id: row.scenario_id,
+        run_id: row.run_id,
+        warning: 'resource_samples_file_not_found',
+        expected_path: samplePathRelative,
+      });
+      continue;
+    }
+    const lines = parseJsonLines(samplePath);
+    for (const line of lines) {
+      if (line.event !== 'sample' || !line.label) continue;
+      const label = sanitizeMetricLabel(line.label);
+      if (!resourceByLabel[label]) {
+        resourceByLabel[label] = {
+          rssMb: [],
+          cpuPercent: [],
+          heapUsedMb: [],
+        };
+      }
+      if (isFiniteNumber(line.rss_bytes)) {
+        resourceByLabel[label].rssMb.push(line.rss_bytes / MB);
+      }
+      if (isFiniteNumber(line.cpu_percent)) {
+        resourceByLabel[label].cpuPercent.push(line.cpu_percent);
+      }
+      if (isFiniteNumber(line.heap_used_bytes)) {
+        resourceByLabel[label].heapUsedMb.push(line.heap_used_bytes / MB);
+      }
+    }
+  }
+  const resourceMetrics = {};
+  for (const [label, values] of Object.entries(resourceByLabel)) {
+    const rssPeak = values.rssMb.length > 0 ? Math.max(...values.rssMb) : null;
+    const rssMean = values.rssMb.length > 0 ? values.rssMb.reduce((sum, value) => sum + value, 0) / values.rssMb.length : null;
+    const cpuPeak = values.cpuPercent.length > 0 ? Math.max(...values.cpuPercent) : null;
+    const cpuMean = values.cpuPercent.length > 0 ? values.cpuPercent.reduce((sum, value) => sum + value, 0) / values.cpuPercent.length : null;
+    resourceMetrics[`${label}_rss_peak_mb`] = rssPeak;
+    resourceMetrics[`${label}_rss_mean_mb`] = rssMean;
+    resourceMetrics[`${label}_cpu_mean_percent`] = cpuMean;
+    resourceMetrics[`${label}_cpu_peak_percent`] = cpuPeak;
+    if (values.heapUsedMb.length > 0) {
+      resourceMetrics[`${label}_heap_used_peak_mb`] = Math.max(...values.heapUsedMb);
+    }
+  }
+
   const output = {
     benchmark_id: opts.benchmarkId,
     generated_at: new Date().toISOString(),
@@ -118,7 +201,9 @@ function main() {
       metrics_with_n_lower_than_complete_valid_runs: lowerNMetrics,
       metrics_missing_definitions: Array.from(missingDefinitions).sort(),
       first_any_result_classifications: Array.from(firstAnyResultClassifications).sort(),
+      resource_samples: resourceWarnings,
     },
+    resource_metrics: resourceMetrics,
   };
   const outPath = path.join(runRoot, 'aggregated', 'summary.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });

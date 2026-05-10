@@ -243,6 +243,100 @@ Override env vars:
 
 The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing.
 
+## Scenario runner (`run_all_scenarios.js`)
+
+Use the scenario harness to execute the full scenario matrix and write raw/aggregated outputs under:
+
+- `benchmarks/results/runs/<benchmark-id>/`
+
+### Resource usage collection (optional, Linux `/proc` based)
+
+Enable per-run resource sampling with:
+
+- `--collect-resource-usage`: enable resource sampler
+- `--resource-sample-interval-ms <ms>`: sampling interval (default: `500`)
+
+This writes JSONL samples to:
+
+- `benchmarks/results/runs/<benchmark-id>/raw/resource-samples/*.jsonl`
+- `benchmarks/results/runs/<benchmark-id>/warmup/resource-samples/*.jsonl`
+
+Each sample file contains:
+
+- Lifecycle events: `resource_collection_started`, `resource_collection_stopped`
+- Actual samples: `event: 'sample'` with `rss_bytes` and `cpu_percent`
+- Exit events: `event: 'process_exit'` when a tracked process exits
+- Missing PIDs: `event: 'missing_pid'` when a PID is unavailable
+
+Timestamps are relative to sampler start (`timestamp_ms`), with periodic samples every `sample_interval_ms`.
+
+**Smoke run example** (quick test with 3 measured runs per scenario):
+
+```bash
+node scripts/benchmark/run_all_scenarios.js \
+  --mode smoke \
+  --runs 3 \
+  --warmup 0 \
+  --collect-resource-usage \
+  --resource-sample-interval-ms 500
+```
+
+**Full benchmark example** (35 measured runs = 5 scenarios × 7 runs):
+
+```bash
+node scripts/benchmark/run_all_scenarios.js \
+  --mode full \
+  --runs 7 \
+  --warmup 0 \
+  --collect-resource-usage \
+  --resource-sample-interval-ms 500
+```
+
+### Aggregation and validation
+
+After benchmarks complete, aggregate results and resource metrics:
+
+```bash
+# Aggregate latency and resource metrics into summary.json
+node scripts/benchmark/aggregate_results.js --benchmark-id <benchmark-id>
+
+# Validate all runs (non-fatal warnings for missing resource samples)
+node scripts/benchmark/validate_results.js --benchmark-id <benchmark-id>
+
+# Validate and require resource samples (fatal if missing)
+node scripts/benchmark/validate_results.js --benchmark-id <benchmark-id> --require-resource-samples
+```
+
+The aggregation produces `<benchmark-id>/aggregated/summary.json` containing:
+
+- Standard latency metrics across all complete, valid runs
+- Resource metrics per process label:
+  - `<label>_rss_peak_mb`: peak resident set size
+  - `<label>_rss_mean_mb`: mean resident set size
+  - `<label>_cpu_mean_percent`: mean CPU utilization
+  - `<label>_cpu_peak_percent`: peak CPU utilization
+  - `<label>_heap_used_peak_mb`: peak heap usage (if sampled)
+
+**Example smoke run with aggregation:**
+
+```bash
+# Run scenarios with resource collection
+node scripts/benchmark/run_all_scenarios.js \
+  --mode smoke \
+  --runs 3 \
+  --warmup 0 \
+  --collect-resource-usage \
+  --resource-sample-interval-ms 500
+
+# Aggregate and validate (replace <benchmark-id> with actual value)
+BENCHMARK_ID=$(ls -t benchmarks/results/runs | head -1)
+node scripts/benchmark/aggregate_results.js --benchmark-id "$BENCHMARK_ID"
+node scripts/benchmark/validate_results.js --benchmark-id "$BENCHMARK_ID"
+
+# View summary
+cat "benchmarks/results/runs/$BENCHMARK_ID/aggregated/summary.json" | jq .resource_metrics
+```
+
 ### Scenario matrix runner
 
 Run a reproducible benchmark matrix:

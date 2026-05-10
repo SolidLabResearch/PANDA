@@ -6,9 +6,10 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const EPSILON_MS = 1;
 
 function parseArgs(argv) {
-  const out = { benchmarkId: null };
+  const out = { benchmarkId: null, requireResourceSamples: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--benchmark-id') out.benchmarkId = argv[i + 1];
+    if (argv[i] === '--require-resource-samples') out.requireResourceSamples = true;
   }
   if (!out.benchmarkId) throw new Error('--benchmark-id is required');
   return out;
@@ -140,11 +141,50 @@ function main() {
   const failures = measured
     .map(({ file, row }) => ({ file, row, reasons: validate(row) }))
     .filter(({ reasons }) => reasons.length > 0);
+  const resourceSampleWarnings = [];
+  for (const { file, row } of measured) {
+    const isCompleteValid = row.status === 'complete' && row.output_check?.passed === true;
+    if (!isCompleteValid) continue;
+    const samplePathRelative = row?.resource_usage?.samples_path;
+    const samplePath = typeof samplePathRelative === 'string' && samplePathRelative.length > 0
+      ? path.join(ROOT, samplePathRelative)
+      : null;
+    if (!samplePath) {
+      resourceSampleWarnings.push({
+        file,
+        scenario_id: row.scenario_id,
+        run_id: row.run_id,
+        warning: 'resource_samples_missing_path',
+      });
+      continue;
+    }
+    if (!fs.existsSync(samplePath)) {
+      resourceSampleWarnings.push({
+        file,
+        scenario_id: row.scenario_id,
+        run_id: row.run_id,
+        warning: 'resource_samples_file_not_found',
+        expected_path: samplePathRelative,
+      });
+      continue;
+    }
+    const stat = fs.statSync(samplePath);
+    if (!stat.isFile() || stat.size === 0) {
+      resourceSampleWarnings.push({
+        file,
+        scenario_id: row.scenario_id,
+        run_id: row.run_id,
+        warning: 'resource_samples_file_empty',
+        expected_path: samplePathRelative,
+      });
+    }
+  }
+  const fatalResourceFailures = opts.requireResourceSamples ? resourceSampleWarnings : [];
   const output = {
     benchmark_id: opts.benchmarkId,
     checked_at: new Date().toISOString(),
     total_raw_files: measured.length,
-    passed: failures.length === 0 && measured.length > 0,
+    passed: failures.length === 0 && fatalResourceFailures.length === 0 && measured.length > 0,
     failures: failures.map(({ file, row, reasons }) => ({
       file,
       scenario_id: row.scenario_id,
@@ -153,6 +193,10 @@ function main() {
       output_check: row.output_check,
       reasons,
     })),
+    warnings: {
+      resource_samples: resourceSampleWarnings,
+      resource_sample_validation_mode: opts.requireResourceSamples ? 'required_fatal' : 'warn_non_fatal',
+    },
   };
   console.log(JSON.stringify(output, null, 2));
   process.exit(output.passed ? 0 : 1);
