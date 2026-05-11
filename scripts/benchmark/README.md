@@ -214,6 +214,98 @@ Useful toggles:
 - `DEBUG_UMA_LATENCY=1`: alias for `UMA_TRACE_TIMINGS=1`
 - `PANDA_UMA_REUSE_ACCESS_TOKEN=true`: first try cached access token before challenge/token exchange (for reuse experiments)
 
+## Protected alert access benchmark
+
+Use `protected_alert_access_benchmark.js` to verify that PANDA-derived alert resources are UMA-protected and only readable after a fresh UMA challenge and token exchange.
+
+The benchmark targets `http://localhost:3000/alice/derived/anomaly-alert/` and measures the alert container read path, not the source stream read path.
+
+By default the benchmark runs a managed preflight with the existing UMA repo helper to ensure the alert resource exists before measuring access. It reuses the current derived-alert setup and does not reuse access tokens across measured iterations.
+
+Run it with:
+
+```bash
+npm run benchmark:protected-alert-access -- --runs 1 --warmup 0
+```
+
+Unmanaged mode skips the preflight and expects the alert resource to already exist:
+
+```bash
+npm run benchmark:protected-alert-access -- --runs 1 --warmup 0 --no-managed-stack
+```
+
+Validate the most recent run with:
+
+```bash
+npm run benchmark:protected-alert-access:validate
+```
+
+Required behavior:
+
+- unauthenticated alert GET must not return `200`
+- the benchmark must exchange a UMA ticket for a fresh token on every measured run
+- authorized alert GET must return `200`
+- the summary must include `alert_target`, UMA timing metrics, and a successful outcome
+
+Output metrics:
+
+- `alert_uma_initial_challenge_ms`: unauthenticated alert GET latency until UMA challenge
+- `alert_uma_token_exchange_ms`: token endpoint latency
+- `alert_authorized_get_ms`: alert GET latency with the exchanged token
+- `alert_total_first_access_ms`: end-to-end latency for the first alert access cycle
+
+## Protected alert lifecycle benchmark
+
+Use `protected_alert_lifecycle_benchmark.js` for a full protected lifecycle run:
+
+- start/verify UMA + CSS + PANDA (managed by default)
+- verify derived setup/policies through the existing derived scenario harness
+- replay critical SpO2 inputs with per-run `benchmark_run_id`
+- verify PANDA generated a current-run anomaly alert
+- perform unauthenticated and authenticated UMA reads on `http://localhost:3000/alice/derived/anomaly-alert/`
+- record lifecycle and alert UMA timings
+
+This is intentionally different from `benchmark:protected-alert-access`:
+
+- `protected-alert-access` only measures reading an already existing protected alert resource.
+- `protected-alert-lifecycle` measures replay + PANDA processing + alert generation + protected alert read.
+
+Smoke run:
+
+```bash
+npm run benchmark:protected-alert-lifecycle -- --runs 1 --warmup 0
+```
+
+Unmanaged mode (services already running):
+
+```bash
+npm run benchmark:protected-alert-lifecycle -- --runs 1 --warmup 0 --no-managed-stack
+```
+
+Full run (for paper numbers on remote machine, not MacBook smoke):
+
+```bash
+npm run benchmark:protected-alert-lifecycle -- --runs 30 --warmup 5
+```
+
+Validation:
+
+```bash
+npm run benchmark:protected-alert-lifecycle:validate -- --summary <summary-path>
+```
+
+If `--summary` is omitted, the validator checks the latest lifecycle result.
+
+Output path pattern:
+
+- `benchmark-results/protected-alert-lifecycle-<timestamp>/protected-alert-lifecycle-<run-id>.summary.json`
+- `benchmark-results/protected-alert-lifecycle-<timestamp>/protected-alert-lifecycle-<run-id>.runs.jsonl`
+
+Required protection behavior:
+
+- unauthenticated alert GET must not return `200`
+- benchmark fails if UMA challenge/token exchange/authorized GET is missing or unsuccessful
+
 
 ### Strict benchmark with live ODRL log proof
 

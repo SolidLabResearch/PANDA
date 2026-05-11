@@ -1,0 +1,42 @@
+{
+  "benchmark_name": "odrl-policy-graph-size",
+  "generated_at": "2026-05-11T20:02:13.757Z",
+  "output_directory": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size",
+  "requester_webid": "http://localhost:3000/bob/profile/card#me",
+  "owner_webid": "http://localhost:3000/alice/profile/card#me",
+  "target": "http://localhost:3000/alice/spo2/",
+  "action": "read",
+  "allow_type_e_distractors": true,
+  "counts": [
+    {
+      "benchmark_policy_count": 1,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-001.ttl",
+      "matching_benchmark_policies": 1
+    },
+    {
+      "benchmark_policy_count": 5,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-005.ttl",
+      "matching_benchmark_policies": 1
+    },
+    {
+      "benchmark_policy_count": 10,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-010.ttl",
+      "matching_benchmark_policies": 1
+    },
+    {
+      "benchmark_policy_count": 25,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-025.ttl",
+      "matching_benchmark_policies": 1
+    },
+    {
+      "benchmark_policy_count": 50,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-050.ttl",
+      "matching_benchmark_policies": 1
+    },
+    {
+      "benchmark_policy_count": 100,
+      "file_path": "/Users/kushbisen/Code/PANDA Platform/PANDA/benchmarks/generated/odrl-policy-graph-size/policies-100.ttl",
+      "matching_benchmark_policies": 1
+    }
+  ]
+}

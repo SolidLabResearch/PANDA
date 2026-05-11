@@ -1,0 +1,1006 @@
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+
+# BEGIN GENERATED PANDA ODRL POLICY GRAPH SIZE BENCHMARK
+# benchmark_name: odrl-policy-graph-size
+# benchmark_policy_count: 100
+# generated_at: 2026-05-11T20:02:13.756Z
+<urn:panda:benchmark:policy:matching-spo2-read> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:matching-spo2-read> ;
+  odrl:permission <urn:panda:benchmark:policy:matching-spo2-read#permission> .
+
+<urn:panda:benchmark:policy:matching-spo2-read#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-001> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-001> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-001#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-001#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/hr/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-002> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-002> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-002#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-002#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-003> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-003> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-003#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-003#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/bob/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-004> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-004> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-004#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-004#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/anomaly-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-005> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-005> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-005#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-005#permission> a odrl:Permission ;
+  odrl:action odrl:write ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-006> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-006> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-006#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-006#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/temperature/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-007> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-007> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-007#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-007#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-002.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-008> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-008> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-008#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-008#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/charlie/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-009> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-009> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-009#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-009#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/spo2-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-010> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-010> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-010#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-010#permission> a odrl:Permission ;
+  odrl:action odrl:append ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-011> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-011> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-011#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-011#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/blood-pressure/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-012> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-012> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-012#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-012#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://nurse-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-013> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-013> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-013#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-013#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/diana/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-014> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-014> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-014#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-014#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/monitoring-summary/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-015> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-015> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-015#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-015#permission> a odrl:Permission ;
+  odrl:action odrl:create ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-016> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-016> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-016#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-016#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/respiration-rate/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-017> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-017> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-017#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-017#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://doctor-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-018> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-018> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-018#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-018#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-001/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-019> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-019> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-019#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-019#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/risk-score/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-020> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-020> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-020#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-020#permission> a odrl:Permission ;
+  odrl:action odrl:delete ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-021> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-021> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-021#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-021#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/glucose/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-022> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-022> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-022#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-022#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-023> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-023> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-023#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-023#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-002/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-024> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-024> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-024#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-024#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/caregiver-notification/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-025> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-025> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-025#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-025#permission> a odrl:Permission ;
+  odrl:action odrl:write ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-026> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-026> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-026#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-026#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/hr/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-027> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-027> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-027#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-027#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-002.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-028> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-028> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-028#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-028#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/bob/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-029> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-029> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-029#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-029#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/anomaly-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-030> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-030> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-030#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-030#permission> a odrl:Permission ;
+  odrl:action odrl:append ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-031> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-031> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-031#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-031#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/temperature/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-032> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-032> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-032#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-032#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://nurse-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-033> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-033> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-033#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-033#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/charlie/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-034> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-034> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-034#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-034#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/spo2-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-035> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-035> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-035#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-035#permission> a odrl:Permission ;
+  odrl:action odrl:create ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-036> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-036> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-036#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-036#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/blood-pressure/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-037> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-037> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-037#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-037#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://doctor-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-038> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-038> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-038#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-038#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/diana/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-039> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-039> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-039#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-039#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/monitoring-summary/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-040> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-040> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-040#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-040#permission> a odrl:Permission ;
+  odrl:action odrl:delete ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-041> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-041> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-041#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-041#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/respiration-rate/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-042> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-042> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-042#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-042#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-043> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-043> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-043#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-043#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-001/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-044> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-044> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-044#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-044#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/risk-score/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-045> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-045> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-045#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-045#permission> a odrl:Permission ;
+  odrl:action odrl:write ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-046> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-046> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-046#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-046#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/glucose/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-047> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-047> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-047#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-047#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-002.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-048> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-048> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-048#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-048#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-002/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-049> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-049> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-049#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-049#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/caregiver-notification/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-050> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-050> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-050#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-050#permission> a odrl:Permission ;
+  odrl:action odrl:append ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-051> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-051> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-051#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-051#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/hr/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-052> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-052> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-052#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-052#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://nurse-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-053> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-053> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-053#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-053#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/bob/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-054> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-054> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-054#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-054#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/anomaly-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-055> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-055> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-055#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-055#permission> a odrl:Permission ;
+  odrl:action odrl:create ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-056> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-056> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-056#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-056#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/temperature/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-057> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-057> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-057#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-057#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://doctor-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-058> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-058> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-058#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-058#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/charlie/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-059> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-059> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-059#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-059#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/spo2-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-060> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-060> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-060#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-060#permission> a odrl:Permission ;
+  odrl:action odrl:delete ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-061> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-061> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-061#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-061#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/blood-pressure/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-062> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-062> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-062#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-062#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-063> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-063> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-063#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-063#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/diana/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-064> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-064> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-064#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-064#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/monitoring-summary/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-065> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-065> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-065#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-065#permission> a odrl:Permission ;
+  odrl:action odrl:write ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-066> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-066> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-066#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-066#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/respiration-rate/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-067> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-067> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-067#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-067#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-002.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-068> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-068> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-068#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-068#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-001/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-069> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-069> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-069#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-069#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/risk-score/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-070> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-070> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-070#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-070#permission> a odrl:Permission ;
+  odrl:action odrl:append ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-071> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-071> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-071#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-071#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/glucose/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-072> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-072> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-072#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-072#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://nurse-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-073> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-073> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-073#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-073#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-002/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-074> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-074> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-074#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-074#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/caregiver-notification/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-075> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-075> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-075#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-075#permission> a odrl:Permission ;
+  odrl:action odrl:create ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-076> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-076> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-076#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-076#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/hr/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-077> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-077> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-077#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-077#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://doctor-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-078> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-078> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-078#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-078#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/bob/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-079> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-079> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-079#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-079#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/anomaly-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-080> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-080> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-080#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-080#permission> a odrl:Permission ;
+  odrl:action odrl:delete ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-081> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-081> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-081#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-081#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/temperature/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-082> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-082> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-082#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-082#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-083> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-083> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-083#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-083#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/charlie/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-084> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-084> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-084#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-084#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/spo2-alert/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-085> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-085> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-085#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-085#permission> a odrl:Permission ;
+  odrl:action odrl:write ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-086> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-086> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-086#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-086#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/blood-pressure/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-087> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-087> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-087#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-087#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://caregiver-002.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-088> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-088> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-088#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-088#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/diana/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-089> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-089> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-089#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-089#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/monitoring-summary/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-090> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-090> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-090#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-090#permission> a odrl:Permission ;
+  odrl:action odrl:append ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-091> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-091> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-091#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-091#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/respiration-rate/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-092> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-092> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-092#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-092#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://nurse-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-093> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-093> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-093#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-093#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-001/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-094> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-094> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-094#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-094#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/risk-score/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-e-095> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-e-095> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-e-095#permission> .
+
+<urn:panda:benchmark:policy:distractor-e-095#permission> a odrl:Permission ;
+  odrl:action odrl:create ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-a-096> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-a-096> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-a-096#permission> .
+
+<urn:panda:benchmark:policy:distractor-a-096#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/glucose/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-b-097> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-b-097> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-b-097#permission> .
+
+<urn:panda:benchmark:policy:distractor-b-097#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <https://doctor-001.example/profile#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-c-098> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-c-098> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-c-098#permission> .
+
+<urn:panda:benchmark:policy:distractor-c-098#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/patient-002/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+
+<urn:panda:benchmark:policy:distractor-d-099> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:distractor-d-099> ;
+  odrl:permission <urn:panda:benchmark:policy:distractor-d-099#permission> .
+
+<urn:panda:benchmark:policy:distractor-d-099#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/derived/caregiver-notification/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+# END GENERATED PANDA ODRL POLICY GRAPH SIZE BENCHMARK

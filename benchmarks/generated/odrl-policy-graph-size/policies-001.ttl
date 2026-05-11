@@ -1,0 +1,16 @@
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+
+# BEGIN GENERATED PANDA ODRL POLICY GRAPH SIZE BENCHMARK
+# benchmark_name: odrl-policy-graph-size
+# benchmark_policy_count: 1
+# generated_at: 2026-05-11T20:32:17.274Z
+<urn:panda:benchmark:policy:matching-spo2-read> a odrl:Agreement ;
+  odrl:uid <urn:panda:benchmark:policy:matching-spo2-read> ;
+  odrl:permission <urn:panda:benchmark:policy:matching-spo2-read#permission> .
+
+<urn:panda:benchmark:policy:matching-spo2-read#permission> a odrl:Permission ;
+  odrl:action odrl:read ;
+  odrl:target <http://localhost:3000/alice/spo2/> ;
+  odrl:assignee <http://localhost:3000/bob/profile/card#me> ;
+  odrl:assigner <http://localhost:3000/alice/profile/card#me> .
+# END GENERATED PANDA ODRL POLICY GRAPH SIZE BENCHMARK
