@@ -21,6 +21,7 @@ export class ReuseTokenUMAFetcher {
         const benchmarkUma: BenchmarkUmaTiming | undefined = benchmarkTiming?.enabled && !benchmarkTiming.firstUmaRecorded
             ? {
                 resource: url,
+                claim_actor_webid: this.claim.token,
                 used_stored_token: false,
                 used_cached_rpt: false,
             }
@@ -88,11 +89,19 @@ export class ReuseTokenUMAFetcher {
         console.log(`[Fetcher] Tokenless request response status: ${noTokenResponse.status}`);
         if (noTokenResponse.ok) {
             console.log(`[Fetcher] No token required for ${url}`);
+            if (benchmarkUma) {
+                benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                benchmarkTiming!.firstUmaRecorded = true;
+            }
             return noTokenResponse;
         }
 
         if (noTokenResponse.status !== 401 && noTokenResponse.status !== 403) {
             console.warn(`[Fetcher] Non-UMA error response (${noTokenResponse.status}) for ${url}. Returning response without token exchange.`);
+            if (benchmarkUma) {
+                benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                benchmarkTiming!.firstUmaRecorded = true;
+            }
             return noTokenResponse;
         }
 
@@ -103,6 +112,10 @@ export class ReuseTokenUMAFetcher {
             console.log(`[Fetcher] Parsed ticket: ${ticket}`);
         } catch (err) {
             console.warn(`[Fetcher] Failed to parse WWW-Authenticate header for ${url}. Returning original response.`, err);
+            if (benchmarkUma) {
+                benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                benchmarkTiming!.firstUmaRecorded = true;
+            }
             return noTokenResponse;
         }
 
@@ -163,6 +176,10 @@ export class ReuseTokenUMAFetcher {
 
         if (!rptResponse.ok) {
             console.error(`[Fetcher] Failed to obtain RPT: ${rptResponse.status}`);
+            if (benchmarkUma) {
+                benchmarkTiming!.serverTiming.uma = benchmarkUma;
+                benchmarkTiming!.firstUmaRecorded = true;
+            }
             return rptResponse;
         }
 

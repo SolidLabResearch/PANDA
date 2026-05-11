@@ -1,5 +1,6 @@
 export type BenchmarkUmaTiming = {
     resource?: string;
+    claim_actor_webid?: string;
     used_stored_token?: boolean;
     used_cached_rpt?: boolean;
     uma_challenge_ms?: number;
@@ -18,6 +19,7 @@ export type BenchmarkParsedWindowDefinition = {
 export type BenchmarkTimingSnapshot = {
     correlation_id: string;
     benchmark_run_id?: string;
+    requested_actor_webid?: string;
     registered_query?: string;
     parsed_rspql_windows?: BenchmarkParsedWindowDefinition[];
     rsp_window_parameter_unit?: string;

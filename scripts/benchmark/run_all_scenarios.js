@@ -21,6 +21,7 @@ const UMA_DIR = resolveRepoPath({
   defaultPath: siblingDefaults.umaRepo,
 });
 const WS_PROTOCOL = 'solid-stream-aggregator-protocol';
+const JIM_WEBID = 'http://localhost:3000/jim/profile/card#me';
 
 function parseArgs(argv) {
   const out = {
@@ -284,6 +285,7 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     containerCreationMs,
     metaPolicyWriteMs: performance.now() - startedMetaAt,
     metaPaths: Array.from(metaFiles.keys()),
+    policyText: policy,
   };
 }
 
@@ -332,6 +334,49 @@ async function exchangeToken(tokenEndpoint, ticket) {
   const body = await response.text();
   if (!response.ok) throw new Error(`UMA token exchange failed status=${response.status} body=${body}`);
   return JSON.parse(body);
+}
+
+async function exchangeTokenForClaim(tokenEndpoint, ticket, claimWebId) {
+  const response = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
+      ticket,
+      claim_token: encodeURIComponent(claimWebId),
+      claim_token_format: 'urn:solidlab:uma:claims:formats:webid',
+    }),
+  });
+  const bodyText = await response.text().catch(() => '');
+  let bodyJson = null;
+  try {
+    bodyJson = bodyText ? JSON.parse(bodyText) : null;
+  } catch (_) {
+    bodyJson = null;
+  }
+  return {
+    status: response.status,
+    ok: response.ok,
+    bodyText,
+    bodyJson,
+  };
+}
+
+function responseContainsProtectedSpo2Content(body) {
+  if (typeof body !== 'string' || body.length === 0) return false;
+  return body.includes('https://saref.etsi.org/core/hasValue')
+    || body.includes('https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2')
+    || body.includes('/alice/spo2/');
+}
+
+function unauthorizedActorPresentInPolicy(policyText, actorWebId) {
+  if (typeof policyText !== 'string' || policyText.length === 0) return false;
+  const escaped = actorWebId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`odrl:(?:assignee|assigner|recipient)\\s+<${escaped}>`, 'i'),
+    new RegExp(`(?:allowedRequester|allowed_requester)\\s+<${escaped}>`, 'i'),
+  ];
+  return patterns.some((pattern) => pattern.test(policyText));
 }
 
 function makeOdrlPolicy(scenario) {
@@ -394,15 +439,18 @@ ${metaPermissions}
 `.trim();
 }
 
-async function startPanda(runRoot, runId) {
+async function startPanda(runRoot, runId, scenario) {
   const logFile = path.join(runRoot, 'raw', `panda-run-${runId}.log`);
   const startedAt = performance.now();
+  const actorWebId = scenario?.panda_query_payload?.actor_webid || 'http://localhost:3000/alice/profile/card#me';
   const child = spawnLogged('npm', ['run', 'start-monitoring'], {
     cwd: ROOT,
     env: {
       ...process.env,
       BENCHMARK_TIMING: '1',
       PANDA_EXPECTED_PROPERTY_IRI: 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      PANDA_UMA_CLAIM_TOKEN: actorWebId,
+      PANDA_UMA_CLAIM_TOKEN_FORMAT: 'urn:solidlab:uma:claims:formats:webid',
     },
   }, logFile);
   await waitForHttp('http://localhost:8080/', 120000);
@@ -590,6 +638,163 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
     });
     ws.connect('ws://localhost:8080/', WS_PROTOCOL);
   });
+}
+
+function registerQueryForDenialAndObserve(scenario, opts, benchmarkRunId, observeMs) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocketClient();
+    const result = {
+      querySendAt: 0,
+      querySendWall: null,
+      registeredQuery: null,
+      ackAt: 0,
+      ackWall: null,
+      ack: null,
+      messages: [],
+      close: null,
+      error: null,
+      timedOut: false,
+    };
+    let settled = false;
+    let observeTimer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(observeTimer);
+      try { ws.abort(); } catch (_) {}
+      resolve(result);
+    };
+
+    ws.on('connectFailed', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(observeTimer);
+      reject(error);
+    });
+
+    ws.on('connect', (conn) => {
+      conn.on('error', (error) => {
+        result.error = error?.message || String(error);
+        finish();
+      });
+      conn.on('close', (code, description) => {
+        result.close = { code, description };
+        finish();
+      });
+      conn.on('message', (message) => {
+        if (message.type !== 'utf8') return;
+        let parsed;
+        try {
+          parsed = JSON.parse(message.utf8Data);
+        } catch (_) {
+          parsed = { raw: message.utf8Data };
+        }
+        if (parsed.type === 'benchmark_ack') {
+          result.ackAt = performance.now();
+          result.ackWall = isoNow();
+          result.ack = parsed;
+        } else {
+          result.messages.push(parsed);
+        }
+      });
+      const query = renderTemplate(scenario.panda_query_payload.query_template, {
+        benchmark_run_id: benchmarkRunId.replace(/-/g, '_'),
+        query_window_ms: opts.queryWindow * 1000,
+      });
+      result.registeredQuery = query;
+      const payload = {
+        query,
+        rules: scenario.panda_query_payload.rules,
+        type: scenario.panda_query_payload.type,
+        actor_webid: scenario.panda_query_payload.actor_webid,
+        correlation_id: benchmarkRunId,
+        benchmark_run_id: benchmarkRunId,
+      };
+      result.querySendAt = performance.now();
+      result.querySendWall = isoNow();
+      conn.sendUTF(JSON.stringify(payload));
+      observeTimer = setTimeout(() => {
+        result.timedOut = true;
+        try { conn.close(); } catch (_) {}
+        finish();
+      }, observeMs);
+    });
+
+    ws.connect('ws://localhost:8080/', WS_PROTOCOL);
+  });
+}
+
+async function directUmaDenialAttempt(targetUrl, claimWebId, httpStatuses) {
+  const out = {
+    target_url: targetUrl,
+    denial_observed: false,
+    protected_content_returned: false,
+    token_exchange_status: null,
+    authorized_get_status: null,
+    http_statuses: [],
+    metrics: {},
+    failure_reason: null,
+  };
+  const startedAt = performance.now();
+  const challengeStartedAt = performance.now();
+  const challengeResponse = await fetch(targetUrl);
+  out.metrics.denial_initial_challenge_ms = performance.now() - challengeStartedAt;
+  out.http_statuses.push({ phase: 'denial_tokenless_get', status: challengeResponse.status, url: targetUrl });
+  httpStatuses.push({ phase: 'denial_tokenless_get', status: challengeResponse.status, url: targetUrl });
+
+  const challengeBody = await challengeResponse.text().catch(() => '');
+  if (challengeResponse.ok) {
+    out.protected_content_returned = responseContainsProtectedSpo2Content(challengeBody);
+    out.failure_reason = 'Tokenless unauthorized GET unexpectedly succeeded.';
+    out.metrics.denial_total_latency_ms = performance.now() - startedAt;
+    out.metrics.denial_decision_observed_ms = out.metrics.denial_total_latency_ms;
+    out.denial_observed = false;
+    return out;
+  }
+
+  let challenge;
+  try {
+    challenge = parseAuthenticateHeader(challengeResponse.headers.get('WWW-Authenticate'));
+  } catch (_) {
+    out.denial_observed = challengeResponse.status === 401 || challengeResponse.status === 403;
+    out.metrics.denial_total_latency_ms = performance.now() - startedAt;
+    out.metrics.denial_decision_observed_ms = out.metrics.denial_total_latency_ms;
+    return out;
+  }
+
+  const tokenExchangeStartedAt = performance.now();
+  const tokenExchange = await exchangeTokenForClaim(challenge.tokenEndpoint, challenge.ticket, claimWebId);
+  out.metrics.denial_token_exchange_ms = performance.now() - tokenExchangeStartedAt;
+  out.token_exchange_status = tokenExchange.status;
+  out.http_statuses.push({ phase: 'denial_token_exchange', status: tokenExchange.status, url: challenge.tokenEndpoint });
+  httpStatuses.push({ phase: 'denial_token_exchange', status: tokenExchange.status, url: challenge.tokenEndpoint });
+
+  if (!tokenExchange.ok || !tokenExchange.bodyJson?.access_token) {
+    out.denial_observed = true;
+    out.metrics.denial_total_latency_ms = performance.now() - startedAt;
+    out.metrics.denial_decision_observed_ms = out.metrics.denial_total_latency_ms;
+    return out;
+  }
+
+  const protectedGetStartedAt = performance.now();
+  const authorizedGet = await fetch(targetUrl, {
+    headers: {
+      Authorization: `${tokenExchange.bodyJson.token_type || 'Bearer'} ${tokenExchange.bodyJson.access_token}`,
+    },
+  });
+  out.metrics.denial_protected_get_ms = performance.now() - protectedGetStartedAt;
+  out.authorized_get_status = authorizedGet.status;
+  out.http_statuses.push({ phase: 'denial_authorized_get', status: authorizedGet.status, url: targetUrl });
+  httpStatuses.push({ phase: 'denial_authorized_get', status: authorizedGet.status, url: targetUrl });
+  const authorizedBody = await authorizedGet.text().catch(() => '');
+  out.protected_content_returned = authorizedGet.ok && responseContainsProtectedSpo2Content(authorizedBody);
+  out.denial_observed = !authorizedGet.ok || !out.protected_content_returned;
+  if (out.protected_content_returned) {
+    out.failure_reason = 'Jim received protected SPO2 content after token exchange.';
+  }
+  out.metrics.denial_total_latency_ms = performance.now() - startedAt;
+  out.metrics.denial_decision_observed_ms = out.metrics.denial_total_latency_ms;
+  return out;
 }
 
 function parseNs(value) {
@@ -1134,6 +1339,51 @@ function metricDefinitions() {
       critical_path: true,
       notes: 'Measured inside PANDA authorization prefetch during query registration when UMA flow is needed.',
     },
+    denial_total_latency_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'denial_attempt_start',
+      end_event: 'denial_decision_observed',
+      interpretation: 'Wall-clock duration of the denial check from the first unauthorized access attempt until denial was observed.',
+      critical_path: true,
+      notes: 'Only emitted for policy-based-denial runs.',
+    },
+    denial_initial_challenge_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'denial_tokenless_get_start',
+      end_event: 'denial_tokenless_get_end',
+      interpretation: 'Duration of the unauthorized tokenless request that yields the first denial challenge or response.',
+      critical_path: true,
+      notes: 'Only emitted when the denial runner observes the initial challenge request.',
+    },
+    denial_token_exchange_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'denial_token_exchange_start',
+      end_event: 'denial_token_exchange_end',
+      interpretation: 'Duration of Jim\'s attempted UMA ticket exchange during the denial check.',
+      critical_path: true,
+      notes: 'Only emitted when a token exchange is attempted.',
+    },
+    denial_protected_get_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'denial_authorized_get_start',
+      end_event: 'denial_authorized_get_end',
+      interpretation: 'Duration of the protected GET retried with Jim\'s token, if a token was minted.',
+      critical_path: true,
+      notes: 'Only emitted when a protected GET is attempted after token exchange.',
+    },
+    denial_decision_observed_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'denial_attempt_start',
+      end_event: 'denial_decision_observed',
+      interpretation: 'Wall-clock time from the start of the denial attempt until the benchmark has enough evidence to conclude deny.',
+      critical_path: true,
+      notes: 'Only emitted for policy-based-denial runs.',
+    },
     odrl_policy_eval_ms: unavailable('odrl_policy_eval_ms', 'ODRL policy evaluation CPU time is not currently emitted by the UMA service for this benchmark.'),
     last_ignored_event_count: {
       unit: 'count',
@@ -1219,7 +1469,7 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
   return timeline.sort((a, b) => a.t_relative_ms - b.t_relative_ms);
 }
 
-function validateOutput(raw, scenario, replayerCounters) {
+function validateAllowOutput(raw, scenario, replayerCounters) {
   const details = {};
   const m = raw.metrics;
   const requiredMarkers = scenario.required_log_markers || [];
@@ -1254,7 +1504,37 @@ function validateOutput(raw, scenario, replayerCounters) {
   return { passed, details };
 }
 
+function validateDenialOutput(raw) {
+  const details = {};
+  const passed = Boolean(
+    raw.status === 'complete'
+    && raw.expected_decision === 'deny'
+    && raw.unauthorized_requester_used === true
+    && raw.unauthorized_actor_webid === JIM_WEBID
+    && raw.unauthorized_actor_present_in_policy === false
+    && raw.resource_publicly_readable === false
+    && raw.protected_content_returned === false
+    && raw.denial_observed === true
+    && raw.monitoring_started_from_unauthorized_data === false
+    && raw.scenario_passed === true
+  );
+  if (!passed) {
+    details.reason = raw.failure_reason || 'One or more denial benchmark assertions failed.';
+  }
+  return { passed, details };
+}
+
+function validateOutput(raw, scenario, replayerCounters) {
+  if (scenario.expected_decision === 'deny' || scenario.scenario_id === 'policy-based-denial') {
+    return validateDenialOutput(raw);
+  }
+  return validateAllowOutput(raw, scenario, replayerCounters);
+}
+
 async function runOneScenario(scenario, opts, runRoot, runId, phase) {
+  if (scenario.expected_decision === 'deny' || scenario.scenario_id === 'policy-based-denial') {
+    return runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phase);
+  }
   const isWarmup = phase === 'warmup';
   const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
   const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
@@ -1325,7 +1605,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
 
     markEvent('panda_start_start');
-    const pandaPromise = startPanda(runRoot, runId);
+    const pandaPromise = startPanda(runRoot, runId, scenario);
     await sleep(15000);
     panda = await pandaPromise;
     markEvent('panda_ready');
@@ -1477,6 +1757,264 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
   }
 }
 
+async function runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phase) {
+  const isWarmup = phase === 'warmup';
+  const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
+  const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
+  const failureDir = isWarmup ? path.join(runRoot, 'failures', 'warmup') : path.join(runRoot, 'failures');
+  ensureDir(rawDir);
+  ensureDir(failureDir);
+  const rawPath = path.join(rawDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const failurePath = path.join(failureDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const httpStatuses = [];
+  const sequence = {};
+  const startedAt = isoNow();
+  const requestedActorWebId = scenario?.panda_query_payload?.actor_webid || null;
+  const targetUrl = scenario?.target_css_resources?.stream_container_url;
+  const raw = {
+    benchmark_id: opts.benchmarkId,
+    benchmark_run_id: benchmarkRunId,
+    git_commit: safeGitCommit(),
+    node_version: process.version,
+    scenario_id: scenario.scenario_id,
+    expected_decision: scenario.expected_decision || 'deny',
+    scenario_file_path: scenario.__scenario_file || null,
+    run_id: runId,
+    phase,
+    mode: opts.mode,
+    deployment_mode: 'single_machine',
+    query_window_seconds: opts.queryWindow,
+    replayer_duration_seconds: opts.replayerDuration,
+    query_registration_delay_seconds: opts.queryRegistrationDelay,
+    started_at: startedAt,
+    completed_at: null,
+    status: 'running',
+    registered_query: null,
+    query_template_source: null,
+    parsed_rspql_windows: null,
+    rsp_window_parameter_unit: null,
+    run_isolation: null,
+    replayer_process: null,
+    validation_warnings: [],
+    sequence,
+    metrics: {},
+    http_statuses: httpStatuses,
+    log_markers_found: [],
+    output_check: { passed: false, details: {} },
+    scenario_passed: false,
+    unauthorized_requester_used: requestedActorWebId === JIM_WEBID,
+    unauthorized_actor_webid: JIM_WEBID,
+    requested_actor_webid: requestedActorWebId,
+    effective_actor_webid: null,
+    effective_actor_webid_observable: false,
+    uma_claim_actor_webid: null,
+    unauthorized_actor_present_in_policy: null,
+    resource_publicly_readable: null,
+    public_get_status: null,
+    public_get_returned_protected_content: null,
+    token_exchange_status: null,
+    authorized_get_status: null,
+    denial_observed: false,
+    protected_content_returned: false,
+    monitoring_started_from_unauthorized_data: false,
+    failure_reason: null,
+    protected_target_resource_url: targetUrl,
+  };
+  let panda;
+  let umaProcess;
+  let replayer;
+  const events = {};
+  const markEvent = (event, notes = '') => {
+    events[event] = { t: performance.now(), timestamp: isoNow(), notes };
+  };
+  let counters = { started: false, completed: false, posted: 0 };
+  let stopReplayerWatcher = () => {};
+  try {
+    console.log(`[DENIAL] starting policy-based denial scenario run=${runId} phase=${phase}`);
+    console.log(`[DENIAL] Jim WebID used: ${JIM_WEBID}`);
+    console.log(`[DENIAL] protected target resource URL: ${targetUrl}`);
+    killPortsIfForced(opts.force, [3000, 4000, 8080]);
+    await sleep(opts.force ? 2000 : 0);
+
+    markEvent('css_uma_start_start');
+    const uma = await startUma(opts, runRoot, runId);
+    umaProcess = uma.child;
+    markEvent('css_uma_ready');
+    sequence.css_uma_started = isoNow();
+    raw.metrics.css_uma_startup_ms = uma.ms;
+
+    const setup = await createContainersAndPolicies(scenario, uma.cssStatePath, httpStatuses);
+    markEvent('containers_created');
+    sequence.containers_created = isoNow();
+    markEvent('meta_policies_written');
+    sequence.meta_policies_written = isoNow();
+    raw.metrics.container_creation_ms = setup.containerCreationMs;
+    raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
+
+    raw.unauthorized_actor_present_in_policy = unauthorizedActorPresentInPolicy(setup.policyText, JIM_WEBID);
+    if (raw.unauthorized_actor_present_in_policy) {
+      raw.failure_reason = 'Unauthorized actor appears in an ODRL assignee/assigner/recipient position.';
+      throw new Error(raw.failure_reason);
+    }
+
+    const publicResponse = await fetch(targetUrl);
+    raw.public_get_status = publicResponse.status;
+    httpStatuses.push({ phase: 'public_preflight_get', status: publicResponse.status, url: targetUrl });
+    const publicBody = await publicResponse.text().catch(() => '');
+    raw.resource_publicly_readable = publicResponse.status >= 200 && publicResponse.status < 300;
+    raw.public_get_returned_protected_content = raw.resource_publicly_readable && responseContainsProtectedSpo2Content(publicBody);
+    console.log(`[DENIAL] public preflight status=${raw.public_get_status} publicly_readable=${raw.resource_publicly_readable} protected_content=${raw.public_get_returned_protected_content}`);
+    if (raw.resource_publicly_readable) {
+      raw.failure_reason = 'Protected target resource is publicly readable without authentication.';
+      raw.protected_content_returned = raw.public_get_returned_protected_content;
+      throw new Error(raw.failure_reason);
+    }
+
+    const denialAttempt = await directUmaDenialAttempt(targetUrl, JIM_WEBID, httpStatuses);
+    raw.token_exchange_status = denialAttempt.token_exchange_status;
+    raw.authorized_get_status = denialAttempt.authorized_get_status;
+    raw.denial_observed = denialAttempt.denial_observed;
+    raw.protected_content_returned = denialAttempt.protected_content_returned;
+    Object.assign(raw.metrics, denialAttempt.metrics);
+    if (denialAttempt.failure_reason) {
+      raw.failure_reason = denialAttempt.failure_reason;
+    }
+    console.log(`[DENIAL] denial point observed=${raw.denial_observed} protected_content_returned=${raw.protected_content_returned}`);
+    if (raw.protected_content_returned) {
+      raw.monitoring_started_from_unauthorized_data = true;
+      raw.failure_reason = raw.failure_reason || 'Jim received protected content during the direct UMA denial attempt.';
+      throw new Error(raw.failure_reason);
+    }
+    if (!raw.denial_observed) {
+      raw.failure_reason = raw.failure_reason || 'The benchmark did not observe a denial during the direct UMA attempt.';
+      throw new Error(raw.failure_reason);
+    }
+
+    markEvent('panda_start_start');
+    const pandaPromise = startPanda(runRoot, runId, scenario);
+    await sleep(15000);
+    panda = await pandaPromise;
+    markEvent('panda_ready');
+    sequence.panda_started = isoNow();
+    raw.metrics.panda_startup_ms = panda.ms;
+
+    replayer = await runReplayer(scenario, opts, runRoot, benchmarkRunId, counters);
+    stopReplayerWatcher = replayer.stopWatcher || (() => {});
+    markEvent('replayer_start');
+    sequence.replayer_started = isoNow();
+    const replayerStartedAt = replayer.startedAtPerf;
+    await waitForReplayerActive(counters, 30000);
+    const delayRemaining = opts.queryRegistrationDelay * 1000 - (performance.now() - replayerStartedAt);
+    if (delayRemaining > 0) await sleep(delayRemaining);
+    const denialQueryResult = await registerQueryForDenialAndObserve(
+      scenario,
+      opts,
+      benchmarkRunId,
+      Math.max(5000, Math.min(20000, (opts.replayerDuration + opts.queryRegistrationDelay + 2) * 1000)),
+    );
+    raw.registered_query = denialQueryResult.registeredQuery;
+    raw.query_template_source = {
+      scenario_file_path: scenario.__scenario_file || null,
+      scenario_id: scenario.scenario_id,
+      query_template_before_substitution: scenario.panda_query_payload.query_template,
+      query_string_after_substitution: raw.registered_query,
+    };
+    const serverQueryMetadata = extractServerQueryMetadata(denialQueryResult);
+    raw.parsed_rspql_windows = serverQueryMetadata.parsedWindows;
+    raw.rsp_window_parameter_unit = serverQueryMetadata.windowParameterUnit;
+    sequence.query_registered = denialQueryResult.querySendWall || isoNow();
+    sequence.query_register_ack = denialQueryResult.ackWall || undefined;
+
+    const ackTiming = denialQueryResult.ack?.benchmark_timing || null;
+    raw.requested_actor_webid = ackTiming?.requested_actor_webid || raw.requested_actor_webid;
+    raw.uma_claim_actor_webid = ackTiming?.uma?.claim_actor_webid || null;
+    raw.effective_actor_webid = raw.uma_claim_actor_webid;
+    raw.effective_actor_webid_observable = typeof raw.uma_claim_actor_webid === 'string' && raw.uma_claim_actor_webid.length > 0;
+    raw.unauthorized_requester_used = raw.requested_actor_webid === JIM_WEBID;
+    if (raw.effective_actor_webid_observable && raw.effective_actor_webid !== JIM_WEBID) {
+      raw.failure_reason = `PANDA used ${raw.effective_actor_webid} instead of Jim during UMA.`;
+    }
+
+    const observedMessages = denialQueryResult.messages || [];
+    const receivedAggregationEvent = observedMessages.some((message) => (
+      Object.prototype.hasOwnProperty.call(message || {}, 'aggregation_event')
+      || responseContainsProtectedSpo2Content(message?.aggregation_event)
+    ));
+    const ackServerTiming = denialQueryResult.ack?.benchmark_timing || {};
+    const streamEventObserved = Boolean(
+      ackServerTiming.first_stream_event_at_ns
+      || ackServerTiming.first_stream_event_added_at_ns
+      || ackServerTiming.first_result_emitted_at_ns,
+    );
+    raw.protected_content_returned = raw.protected_content_returned || receivedAggregationEvent;
+    raw.monitoring_started_from_unauthorized_data = raw.protected_content_returned || receivedAggregationEvent || streamEventObserved;
+    if (raw.protected_content_returned) {
+      raw.failure_reason = raw.failure_reason || 'PANDA returned a monitoring result containing protected SPO2 content to Jim.';
+    } else if (streamEventObserved) {
+      raw.failure_reason = raw.failure_reason || 'PANDA progressed into stream processing for Jim instead of failing closed.';
+    }
+
+    const replayerExitInfo = await replayer.exitInfoPromise;
+    stopReplayerWatcher();
+    markEvent('replayer_completed');
+    sequence.replayer_completed = isoNow();
+    raw.replayer_process = {
+      command: replayer.command,
+      requested_duration_seconds: opts.replayerDuration,
+      process_started_at: replayer.startedAtWall,
+      process_exit_at: replayerExitInfo.exitedAtWall,
+      exit_code: replayerExitInfo.code,
+      exit_signal: replayerExitInfo.signal,
+      actual_process_runtime_ms: replayerExitInfo.exitedAtPerf - replayer.startedAtPerf,
+    };
+    raw.metrics.replayer_total_runtime_ms = raw.replayer_process.actual_process_runtime_ms;
+    raw.log_markers_found = findLogMarkers(panda.logFile, scenario.required_log_markers);
+    raw.status = 'complete';
+    raw.completed_at = isoNow();
+    raw.scenario_passed = Boolean(
+      raw.unauthorized_requester_used === true
+      && raw.unauthorized_actor_webid === JIM_WEBID
+      && raw.unauthorized_actor_present_in_policy === false
+      && raw.resource_publicly_readable === false
+      && raw.protected_content_returned === false
+      && raw.denial_observed === true
+      && raw.monitoring_started_from_unauthorized_data === false
+      && (!raw.effective_actor_webid_observable || raw.effective_actor_webid === JIM_WEBID)
+    );
+    raw.validation_warnings = buildValidationWarnings(raw);
+    attachMetricDefinitions(raw);
+    raw.output_check = validateOutput(raw, scenario, counters);
+    console.log(`[DENIAL] scenario passed=${raw.scenario_passed} output_check=${raw.output_check.passed}`);
+    writeJson(rawPath, raw);
+    if (!raw.output_check.passed) {
+      writeJson(failurePath, raw);
+      if (!opts.continueOnFailure) throw new Error(raw.failure_reason || 'Policy-based denial benchmark failed');
+    }
+    return raw;
+  } catch (error) {
+    raw.status = 'failed';
+    raw.completed_at = isoNow();
+    raw.error = error?.stack || String(error);
+    raw.scenario_passed = false;
+    raw.validation_warnings = buildValidationWarnings(raw);
+    attachMetricDefinitions(raw);
+    raw.output_check = { passed: false, details: { error: String(error?.message || error), reason: raw.failure_reason || undefined } };
+    console.log(`[DENIAL] scenario passed=false error=${error?.message || error}`);
+    writeJson(failurePath, raw);
+    writeJson(rawPath, raw);
+    if (!opts.continueOnFailure) throw error;
+    return raw;
+  } finally {
+    stopReplayerWatcher();
+    stopChild(replayer?.child);
+    stopChild(panda?.child);
+    stopChild(umaProcess);
+    if (opts.force) {
+      killPortsIfForced(true, [3000, 4000, 8080]);
+    }
+  }
+}
+
 function findLogMarkers(logFile, markers) {
   let text = '';
   try {
@@ -1518,6 +2056,12 @@ function buildRunIsolationEvidence(metrics) {
 
 function buildValidationWarnings(raw) {
   const warnings = [];
+  if (raw.expected_decision === 'deny' && raw.effective_actor_webid_observable === false) {
+    warnings.push({
+      code: 'effective_actor_webid_not_directly_observable',
+      message: 'The benchmark could not directly observe the UMA claim WebID from PANDA runtime evidence.',
+    });
+  }
   const runtimeDeltaMs = Number.isFinite(raw?.metrics?.replayer_total_runtime_ms)
     ? Math.abs(raw.metrics.replayer_total_runtime_ms - raw.replayer_duration_seconds * 1000)
     : null;

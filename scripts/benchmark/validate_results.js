@@ -32,8 +32,40 @@ const NUMERIC_METADATA_FIELDS = new Set([
   'query_registration_delay_seconds',
   'replayer_duration_seconds',
 ]);
+const JIM_WEBID = 'http://localhost:3000/jim/profile/card#me';
+
+function validateDenial(row) {
+  const failures = [];
+  const requireCheck = (condition, reason) => {
+    if (!condition) failures.push(reason);
+  };
+  requireCheck(row.status !== 'running', 'run is still marked running');
+  requireCheck(row.status === 'complete', 'run is not complete');
+  requireCheck(row.output_check?.passed === true, 'output_check.passed is not true');
+  requireCheck(row.scenario_passed === true, 'scenario_passed is not true');
+  requireCheck(row.unauthorized_requester_used === true, 'unauthorized_requester_used is not true');
+  requireCheck(row.unauthorized_actor_webid === JIM_WEBID, 'unauthorized_actor_webid is not Jim');
+  requireCheck(row.unauthorized_actor_present_in_policy === false, 'unauthorized_actor_present_in_policy is not false');
+  requireCheck(row.resource_publicly_readable === false, 'resource_publicly_readable is not false');
+  requireCheck(row.protected_content_returned === false, 'protected_content_returned is not false');
+  requireCheck(row.denial_observed === true, 'denial_observed is not true');
+  requireCheck(row.monitoring_started_from_unauthorized_data === false, 'monitoring_started_from_unauthorized_data is not false');
+  if (row.effective_actor_webid_observable === true) {
+    requireCheck(row.effective_actor_webid === JIM_WEBID, 'effective_actor_webid is observable and is not Jim');
+  }
+  const definitions = row.metric_definitions || {};
+  for (const [key, value] of Object.entries(row.metrics || {})) {
+    if (value !== null && value !== undefined) {
+      requireCheck(Boolean(definitions[key]), `missing metric_definitions entry for ${key}`);
+    }
+  }
+  return failures;
+}
 
 function validate(row) {
+  if (row.expected_decision === 'deny' || row.scenario_id === 'policy-based-denial') {
+    return validateDenial(row);
+  }
   const m = row.metrics || {};
   const definitions = row.metric_definitions || {};
   const failures = [];

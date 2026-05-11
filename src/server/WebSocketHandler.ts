@@ -419,7 +419,16 @@ export class WebSocketHandler {
         const benchmarkRunId = typeof wsMessage.benchmark_run_id === 'string' && wsMessage.benchmark_run_id.length > 0
             ? wsMessage.benchmark_run_id
             : correlationId;
-        return createBenchmarkTimingContext(correlationId, benchmarkRunId);
+        const context = createBenchmarkTimingContext(correlationId, benchmarkRunId);
+        const requestedActorWebId = typeof wsMessage.actor_webid === 'string' && wsMessage.actor_webid.length > 0
+            ? wsMessage.actor_webid
+            : (typeof wsMessage.actor === 'string' && wsMessage.actor.length > 0
+                ? wsMessage.actor
+                : (typeof wsMessage.webid === 'string' && wsMessage.webid.length > 0 ? wsMessage.webid : undefined));
+        if (requestedActorWebId) {
+            context.serverTiming.requested_actor_webid = requestedActorWebId;
+        }
+        return context;
     }
 
     private maybeSendBenchmarkAck(connection: WebSocket.connection, queryHash: string, queryId: string | undefined, benchmarkTiming?: BenchmarkTimingContext): void {
