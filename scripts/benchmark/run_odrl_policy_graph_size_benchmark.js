@@ -503,6 +503,123 @@ async function runUmaAccessIteration(config, phase, iteration, benchmarkPolicyCo
   return row;
 }
 
+async function runReadinessProbe(config, benchmarkPolicyCount, timeoutMs = 30000, retryDelayMs = 500) {
+  const started = nowMs();
+  const maxAttempts = Math.max(1, Math.floor(timeoutMs / Math.max(100, retryDelayMs)));
+  let attempt = 0;
+
+  while (attempt < maxAttempts && nowMs() - started < timeoutMs) {
+    attempt += 1;
+    const attemptElapsedMs = Number((nowMs() - started).toFixed(3));
+    console.log(`[benchmark:${BENCHMARK_NAME}] readiness probe attempt ${attempt} (elapsed ${attemptElapsedMs}ms) for policy count ${benchmarkPolicyCount}`);
+
+    try {
+      // Step 1: Check if target resource is public
+      console.log(`[benchmark:${BENCHMARK_NAME}]   → unauthenticated GET ${config.requestTarget}`);
+      let publicCheckResponse;
+      try {
+        publicCheckResponse = await fetch(config.requestTarget, { method: 'GET' });
+      } catch (error) {
+        throw new Error(
+          formatFetchError('Readiness: unauthenticated GET', 'GET', config.requestTarget, `failed: ${error.message}`)
+        );
+      }
+
+      if (publicCheckResponse.status === 200) {
+        throw new Error('Target resource is public; benchmark invalid.');
+      }
+
+      if (publicCheckResponse.status !== 401) {
+        const body = await publicCheckResponse.text().catch(() => '');
+        throw new Error(`Expected 401 challenge from unauthenticated GET, got ${publicCheckResponse.status}: ${body}`);
+      }
+
+      // Step 2: Parse UMA challenge
+      console.log(`[benchmark:${BENCHMARK_NAME}]   → got UMA challenge (401)`);
+      const challenge = parseAuthenticateHeader(publicCheckResponse.headers.get('WWW-Authenticate') || '');
+
+      // Step 3: Token exchange
+      console.log(`[benchmark:${BENCHMARK_NAME}]   → exchanging ticket for token`);
+      let tokenResponse;
+      try {
+        tokenResponse = await fetch(challenge.tokenEndpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
+            ticket: challenge.ticket,
+            claim_token: encodeURIComponent(config.requesterWebId),
+            claim_token_format: config.claimTokenFormat,
+          }),
+        });
+      } catch (error) {
+        throw new Error(
+          formatFetchError('Readiness: token exchange', 'POST', challenge.tokenEndpoint, `failed: ${error.message}`)
+        );
+      }
+
+      if (!tokenResponse.ok) {
+        const body = await tokenResponse.text().catch(() => '');
+        throw new Error(`Token exchange failed (${tokenResponse.status}): ${body}`);
+      }
+
+      const tokenBody = await tokenResponse.text();
+      const tokenJson = JSON.parse(tokenBody);
+      if (!tokenJson.access_token) {
+        throw new Error('Token exchange response is missing access_token.');
+      }
+
+      // Step 4: Authorized GET
+      console.log(`[benchmark:${BENCHMARK_NAME}]   → authorized GET with token`);
+      let authorizedResponse;
+      try {
+        authorizedResponse = await fetch(config.requestTarget, {
+          method: 'GET',
+          headers: { Authorization: `${tokenJson.token_type || 'Bearer'} ${tokenJson.access_token}` },
+        });
+      } catch (error) {
+        throw new Error(
+          formatFetchError('Readiness: authorized GET', 'GET', config.requestTarget, `failed: ${error.message}`)
+        );
+      }
+
+      if (authorizedResponse.status === 200) {
+        console.log(`[benchmark:${BENCHMARK_NAME}] target resource is ready (authorized GET returned 200)`);
+        return; // Success
+      }
+
+      if (authorizedResponse.status === 404) {
+        const body = await authorizedResponse.text().catch(() => '');
+        console.log(`[benchmark:${BENCHMARK_NAME}]   ⚠ target not available yet (authorized GET returned 404). Retrying...`);
+        await sleep(retryDelayMs);
+        continue; // Retry
+      }
+
+      // Other error status
+      const body = await authorizedResponse.text().catch(() => '');
+      throw new Error(`Authorized GET failed (${authorizedResponse.status}): ${body}`);
+    } catch (error) {
+      // Log the error and decide whether to retry or fail
+      if (error.message.includes('target not available yet')) {
+        // Already logged as retryable, continue loop
+        continue;
+      }
+      // Other errors: check if we should retry or fail
+      if (error.message.includes('404')) {
+        // Treat 404 as retryable
+        console.log(`[benchmark:${BENCHMARK_NAME}]   ⚠ ${error.message}. Retrying...`);
+        await sleep(retryDelayMs);
+        continue;
+      }
+      // Non-404 errors are fatal
+      throw error;
+    }
+  }
+
+  // Timeout without success
+  throw new Error(`Protected target resource is not available after readiness timeout (${timeoutMs}ms).`);
+}
+
 function aggregateLevelRows(rows) {
   const measured = rows.filter((row) => row.phase === 'measured');
   const metricValues = (metricName) => measured
@@ -698,6 +815,9 @@ async function main() {
           `Expected exactly one matching benchmark policy for count=${benchmarkPolicyCount}, got ${inventory.matching_benchmark_policies_loaded}.`
         );
       }
+
+      console.log(`[benchmark:${BENCHMARK_NAME}] running readiness probe for policy count ${benchmarkPolicyCount}`);
+      await runReadinessProbe(config, benchmarkPolicyCount, 30000, 500);
 
       const levelRows = [];
       const total = config.warmupIterations + config.iterations;
