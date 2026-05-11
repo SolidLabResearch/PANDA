@@ -8,6 +8,7 @@ const EventEmitter = require('events');
 import { ReuseTokenUMAFetcher } from "../service/authorization/ReuseTokenUMAFetcher";
 import { getUmaClaim } from "../config/UmaClaim";
 import { resolveNotificationTopic } from "./NotificationTopicResolver";
+import { authorizeBenchmarkControl } from "../utils/benchmark/BenchmarkControl";
 
 /**
  * Class for the HTTP Server.
@@ -61,7 +62,7 @@ export class HTTPServer {
      */
     private request_handler(req: IncomingMessage, res: ServerResponse) {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET');
+        res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST');
         let body: string = '';
 
         switch (req.method) {
@@ -76,13 +77,70 @@ export class HTTPServer {
                 });
                 req.on('end', async () => {
                     try {
+                        const requestPath = (req.url || '').split('?')[0];
+                        if (requestPath === '/benchmark/derived-view-ingest') {
+                            const target = typeof req.headers['x-benchmark-target'] === 'string'
+                                ? req.headers['x-benchmark-target']
+                                : undefined;
+                            const benchmarkControlToken = typeof req.headers['x-benchmark-control-token'] === 'string'
+                                ? req.headers['x-benchmark-control-token']
+                                : undefined;
+                            const windowCloseMarkerTimestamp = typeof req.headers['x-benchmark-window-close-marker-timestamp'] === 'string'
+                                ? req.headers['x-benchmark-window-close-marker-timestamp']
+                                : undefined;
+                            const authResult = authorizeBenchmarkControl(benchmarkControlToken);
+                            if (!authResult.accepted) {
+                                this.logger.warn({
+                                    control: 'derived_view_batch_ingest',
+                                    reason: authResult.reason || 'unknown',
+                                }, 'benchmark_control_rejected');
+                                res.writeHead(403, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ accepted: false, reason: authResult.reason || 'unknown' }));
+                                return;
+                            }
+                            if (!target || typeof target !== 'string' || target.length === 0 || body.trim().length === 0) {
+                                res.writeHead(400, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ accepted: false, reason: 'missing_target_or_body' }));
+                                return;
+                            }
+                            this.logger.info({
+                                target,
+                                payload_size_bytes: Buffer.byteLength(body, 'utf8'),
+                            }, 'benchmark_derived_view_batch_ingest_received');
+                            this.event_emitter.emit(target, JSON.stringify({
+                                type: 'benchmark_derived_view_batch',
+                                target,
+                                data: body,
+                                benchmark_control_token: benchmarkControlToken,
+                                window_close_marker_timestamp: windowCloseMarkerTimestamp,
+                            }));
+                            res.writeHead(202, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ accepted: true }));
+                            return;
+                        }
                         const webhook_notification_data = JSON.parse(body);
                         this.logger.info({}, 'webhook_notification_data_received');
 
                         if (webhook_notification_data.type === 'Add') {
                             this.logger.info({}, 'webhook_notification_received');
                             const target = typeof webhook_notification_data.target === 'string' ? webhook_notification_data.target : undefined;
-                            const topic = resolveNotificationTopic(webhook_notification_data, target);
+                            const benchmarkControlToken = typeof webhook_notification_data?.benchmark_control_token === 'string'
+                                ? webhook_notification_data.benchmark_control_token
+                                : undefined;
+                            let allowExactTopic = false;
+                            if (webhook_notification_data?.use_exact_topic === true) {
+                                const authResult = authorizeBenchmarkControl(benchmarkControlToken);
+                                if (authResult.accepted) {
+                                    allowExactTopic = true;
+                                    this.logger.info({}, 'benchmark_control_accepted');
+                                } else {
+                                    this.logger.warn({
+                                        control: 'use_exact_topic',
+                                        reason: authResult.reason || 'unknown',
+                                    }, 'benchmark_control_rejected');
+                                }
+                            }
+                            const topic = resolveNotificationTopic(webhook_notification_data, target, allowExactTopic);
                             const fetchTarget = target || topic;
 
                             if (!fetchTarget || !topic) {
@@ -113,13 +171,17 @@ export class HTTPServer {
                                     this.logger.warn({ topic, fetch_target: fetchTarget, status: latest_event_response.status }, 'webhook_notification_fetch_failed');
                                 }
                             }
-                        }
+                         }
                     } catch (error: any) {
                         console.error(`Error while handling webhook notification: ${error?.message ?? String(error)}`);
                         this.logger.error({ error: error?.message ?? String(error) }, 'webhook_notification_processing_failed');
+                        if (!res.writableEnded) {
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ accepted: false, error: error?.message ?? String(error) }));
+                        }
                     }
                 });
-                break;
+                return;
             default:
                 res.writeHead(405, { 'Content-Type': 'text/plain' });
                 break;
@@ -128,7 +190,7 @@ export class HTTPServer {
         if (req.method === 'OPTIONS') {
             res.writeHead(200, {
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'OPTIONS, GET',
+                'Access-Control-Allow-Methods': 'OPTIONS, GET, POST',
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Content-Length': 0
             });

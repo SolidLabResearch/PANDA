@@ -56,6 +56,11 @@ export type BenchmarkServerMetrics = {
     rsp_events_added_with_other_benchmark_run_id_count?: number;
     rsp_query_eval_ms?: number;
     first_result_emit_ms?: number;
+    derived_view_payload_size_bytes?: number;
+    derived_view_parse_ms?: number;
+    derived_view_observation_count?: number;
+    bounded_observation_ingest_total_ms?: number;
+    bounded_observation_ingest_mean_ms?: number;
 };
 
 export type BenchmarkTimingContext = {

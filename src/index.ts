@@ -10,7 +10,8 @@ function getTimestamp() {
 const timestamp = getTimestamp();
 
 const log_file = fs.createWriteStream(`aggregator-${timestamp}.log`, { flags: 'a' });
-const resource_used_log_file = `aggregator_resource_used-${timestamp}.csv`;
+const resource_used_log_file = process.env.PANDA_RESOURCE_USAGE_LOG_FILE || `aggregator_resource_used-${timestamp}.csv`;
+const resource_usage_interval_ms = Number(process.env.PANDA_RESOURCE_USAGE_INTERVAL_MS || 500);
 const logger = bunyan.createLogger({
     name: 'solid-stream-aggregator',
     streams: [
@@ -34,20 +35,26 @@ interface MemoryUsage {
     heapTotal: number;
     heapUsed: number;
     external: number;
+    arrayBuffers?: number;
 }
 
-fs.writeFileSync(resource_used_log_file, `timestamp, cpu_user, cpu_system, rss, heapTotal, heapUsed, external\n`);
+fs.writeFileSync(
+    resource_used_log_file,
+    'timestamp,cpu_user_microseconds,cpu_system_microseconds,rss_bytes,heap_total_bytes,heap_used_bytes,external_bytes,array_buffers_bytes\n'
+);
 
 
 function logCpuMemoryUsage() {
     const cpuUsage = process.cpuUsage(); // in microseconds
     const memoryUsage: MemoryUsage = process.memoryUsage(); // in bytes
     const timestamp = Date.now();
-    const logData = `${timestamp},${cpuUsage.user},${memoryUsage.rss},${memoryUsage.heapTotal},${memoryUsage.heapUsed},${memoryUsage.external}\n`;
+    const arrayBuffersBytes = typeof memoryUsage.arrayBuffers === 'number' ? memoryUsage.arrayBuffers : '';
+    const externalBytes = typeof memoryUsage.external === 'number' ? memoryUsage.external : '';
+    const logData = `${timestamp},${cpuUsage.user},${cpuUsage.system},${memoryUsage.rss},${memoryUsage.heapTotal},${memoryUsage.heapUsed},${externalBytes},${arrayBuffersBytes}\n`;
     fs.appendFileSync(resource_used_log_file, logData);
 }
 
-setInterval(logCpuMemoryUsage, 500);
+setInterval(logCpuMemoryUsage, Number.isFinite(resource_usage_interval_ms) && resource_usage_interval_ms > 0 ? resource_usage_interval_ms : 500);
 
 const program = require('commander');
 

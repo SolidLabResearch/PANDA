@@ -1,11 +1,13 @@
 import { turtleStringToStore } from "@treecg/ldes-snapshot";
 import { DataFactory } from 'rdf-data-factory';
+import { Store } from 'n3';
 import { LDESinLDP, LDPCommunication } from "@treecg/versionawareldesinldp";
 import { RDFStream, RSPEngine } from "rsp-js";
 import { TREE } from "@treecg/versionawareldesinldp";
 import { create_subscription, extract_ldp_inbox, extract_subscription_server } from "../../utils/notifications/Util";
 import { performance } from "perf_hooks";
-import { BenchmarkTimingContext, incrementBenchmarkMetric, maybeMarkBenchmarkNs, recordRspEventAddDuration, recordRspStreamEventTimestamp } from "../../utils/benchmark/BenchmarkTiming";
+import { BenchmarkTimingContext, addBenchmarkMetric, incrementBenchmarkMetric, maybeMarkBenchmarkNs, recordRspEventAddDuration, recordRspStreamEventTimestamp } from "../../utils/benchmark/BenchmarkTiming";
+import { authorizeBenchmarkControl } from "../../utils/benchmark/BenchmarkControl";
 const DF = new DataFactory();
 import { TokenManagerService } from "../authorization/TokenManagerService";
 const token_manager = TokenManagerService.getInstance();
@@ -119,6 +121,53 @@ export class NotificationStreamProcessor {
         const relates_to_property_predicate = "https://saref.etsi.org/core/relatesToProperty";
         const expected_property_iri = process.env.PANDA_EXPECTED_PROPERTY_IRI;
         const eventHandler = async (latest_event: string) => {
+            const benchmarkControl = this.parseBenchmarkControlPayload(latest_event);
+            if (benchmarkControl?.type === 'benchmark_derived_view_batch') {
+                const incomingToken = typeof benchmarkControl?.benchmark_control_token === 'string'
+                    ? benchmarkControl.benchmark_control_token
+                    : undefined;
+                const authResult = authorizeBenchmarkControl(incomingToken);
+                if (!authResult.accepted) {
+                    this.logger.warn({
+                        control: 'benchmark_derived_view_batch',
+                        reason: authResult.reason || 'unknown',
+                    }, 'benchmark_control_rejected');
+                    return;
+                }
+                this.logger.info({}, 'benchmark_control_accepted');
+                await this.ingestDerivedViewBatch(
+                    typeof benchmarkControl?.data === 'string' ? benchmarkControl.data : '',
+                    typeof benchmarkControl?.target === 'string' ? benchmarkControl.target : this.ldes_stream,
+                    typeof benchmarkControl?.window_close_marker_timestamp === 'string'
+                        ? benchmarkControl.window_close_marker_timestamp
+                        : undefined,
+                );
+                return;
+            }
+            const watermarkTimestamp = benchmarkControl?.timestamp_ms;
+            if (benchmarkControl?.type === 'set_watermark') {
+                const incomingToken = typeof benchmarkControl?.benchmark_control_token === 'string'
+                    ? benchmarkControl.benchmark_control_token
+                    : undefined;
+                const authResult = authorizeBenchmarkControl(incomingToken);
+                if (!authResult.accepted) {
+                    this.logger.warn({
+                        control: 'set_watermark',
+                        reason: authResult.reason || 'unknown',
+                    }, 'benchmark_control_rejected');
+                    return;
+                }
+                this.logger.info({}, 'benchmark_control_accepted');
+                if (watermarkTimestamp !== undefined && Number.isFinite(watermarkTimestamp)) {
+                    this.advanceRspWatermark(watermarkTimestamp);
+                } else {
+                    this.logger.warn({
+                        control: 'set_watermark',
+                        reason: 'invalid_timestamp_ms',
+                    }, 'benchmark_control_rejected');
+                }
+                return;
+            }
             this.auditContext?.onDataAccess?.(this.ldes_stream);
             if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstStreamEventRecorded) {
                 maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_stream_event_at_ns', true);
@@ -216,7 +265,7 @@ export class NotificationStreamProcessor {
      * @memberof NotificationStreamProcessor
      */
     public async add_event_store_to_rsp_engine(event_store: any, stream_name: RDFStream[], timestamp: number) {
-        stream_name.forEach(async (stream: RDFStream) => {
+        for (const stream of stream_name) {
             const quads = event_store.getQuads(null, null, null, null);
             console.log(`[VALIDATION][INGEST] add_event_store_quads stream=${stream.name} quad_count=${quads.length} timestamp_epoch=${timestamp} timestamp_iso=${new Date(timestamp).toISOString()}`);
             for (const quad of quads) {
@@ -226,10 +275,10 @@ export class NotificationStreamProcessor {
                     this.auditContext.benchmarkTiming.firstStreamEventAddedRecorded = true;
                 }
                 const addStartedAt = performance.now();
-                stream.add(quad, timestamp)
+                stream.add(quad, timestamp);
                 recordRspEventAddDuration(this.auditContext?.benchmarkTiming, performance.now() - addStartedAt);
             }
-        });
+        }
     }
 
     private getEventTopics(): string[] {
@@ -300,6 +349,142 @@ export class NotificationStreamProcessor {
             return;
         }
         incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, `${prefix}_without_benchmark_run_id_count` as any);
+    }
+
+    private async ingestDerivedViewBatch(
+        payload: string,
+        target: string,
+        windowCloseMarkerTimestamp?: string,
+    ): Promise<void> {
+        const payloadSizeBytes = Buffer.byteLength(payload || '', 'utf8');
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'derived_view_payload_size_bytes', payloadSizeBytes);
+
+        const parseStartedAt = performance.now();
+        let store: Store;
+        try {
+            store = await turtleStringToStore(payload);
+        } catch (error) {
+            this.logger.warn({ target, error: (error as Error)?.message || String(error) }, 'derived_view_batch_parsing_failed');
+            throw error;
+        }
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'derived_view_parse_ms', performance.now() - parseStartedAt);
+
+        const quads = store.getQuads(null, null, null, null);
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'rdf_quads_parsed_count', quads.length);
+        const classification = this.classifyBenchmarkRunFromQuads(quads);
+        this.recordRunIsolationMetric('source', classification);
+
+        const observationMap = new Map<string, {
+            subject: string;
+            quads: any[];
+            timestamp: string | null;
+            timestampMs: number | null;
+            isObservation: boolean;
+        }>();
+        for (const quad of quads) {
+            const subject = quad.subject.value;
+            const predicate = quad.predicate.value;
+            if (!observationMap.has(subject)) {
+                observationMap.set(subject, {
+                    subject,
+                    quads: [],
+                    timestamp: null,
+                    timestampMs: null,
+                    isObservation: false,
+                });
+            }
+            const observation = observationMap.get(subject)!;
+            observation.quads.push(quad);
+            if ([
+                'https://saref.etsi.org/core/hasTimestamp',
+                'https://saref.etsi.org/core/hasValue',
+                'https://saref.etsi.org/core/measurementMadeBy',
+                'https://saref.etsi.org/core/relatesToProperty',
+            ].includes(predicate)) {
+                observation.isObservation = true;
+            }
+            if (predicate === 'https://saref.etsi.org/core/hasTimestamp') {
+                observation.timestamp = quad.object.value;
+                observation.timestampMs = Date.parse(quad.object.value);
+            }
+        }
+
+        const observations = Array.from(observationMap.values())
+            .filter((observation) => observation.isObservation)
+            .sort((left, right) => {
+                const leftTimestamp = left.timestampMs ?? Number.POSITIVE_INFINITY;
+                const rightTimestamp = right.timestampMs ?? Number.POSITIVE_INFINITY;
+                return leftTimestamp - rightTimestamp;
+            });
+        for (const observation of observations) {
+            if (!observation.timestamp || !Number.isFinite(observation.timestampMs)) {
+                throw new Error(`Derived view observation ${observation.subject} is missing a valid timestamp.`);
+            }
+        }
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'derived_view_observation_count', observations.length);
+
+        const ingestStartedAt = performance.now();
+        for (const observation of observations) {
+            const eventStore = new Store();
+            eventStore.addQuads(observation.quads);
+            const eventStream = this.stream_name ? [this.stream_name] : [];
+            if (eventStream.length === 0) {
+                throw new Error(`Cannot ingest derived view observation ${observation.subject} because the RSP stream is unavailable.`);
+            }
+            const timestampMs = observation.timestampMs as number;
+            this.recordRunIsolationMetric('rsp_added', classification);
+            recordRspStreamEventTimestamp(this.auditContext?.benchmarkTiming, timestampMs);
+            if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstStreamEventRecorded) {
+                maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_stream_event_at_ns', true);
+                this.auditContext.benchmarkTiming.firstStreamEventRecorded = true;
+            }
+            console.log(`[VALIDATION][INGEST] derived_view_observation stream=${target} subject=${observation.subject} timestamp_epoch=${timestampMs}`);
+            await this.add_event_store_to_rsp_engine(eventStore, eventStream, timestampMs);
+        }
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'bounded_observation_ingest_total_ms', performance.now() - ingestStartedAt);
+        const count = observations.length;
+        if (count > 0) {
+            const total = this.auditContext?.benchmarkTiming?.serverTiming.metrics?.bounded_observation_ingest_total_ms ?? 0;
+            addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'bounded_observation_ingest_mean_ms', total / count);
+        }
+
+        if (windowCloseMarkerTimestamp) {
+            const watermarkTimestamp = Date.parse(windowCloseMarkerTimestamp);
+            if (Number.isFinite(watermarkTimestamp)) {
+                this.advanceRspWatermark(watermarkTimestamp);
+            } else {
+                this.logger.warn({
+                    control: 'set_watermark',
+                    reason: 'invalid_timestamp_ms',
+                }, 'benchmark_control_rejected');
+            }
+        }
+    }
+
+    private parseBenchmarkControlPayload(payload: string): {
+        type?: string;
+        timestamp_ms?: number;
+        benchmark_control_token?: string;
+        data?: string;
+        target?: string;
+        window_close_marker_timestamp?: string;
+    } | null {
+        if (typeof payload !== 'string' || payload.length === 0) {
+            return null;
+        }
+        try {
+            const parsed = JSON.parse(payload);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private advanceRspWatermark(timestampMs: number): void {
+        for (const window of this.rsp_engine.windows || []) {
+            window.set_current_watermark(timestampMs);
+        }
+        this.logger.info({ timestamp_ms: timestampMs }, 'watermark_control_applied');
     }
 }
 

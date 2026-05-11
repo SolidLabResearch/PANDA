@@ -26,9 +26,12 @@ function inferDerivedLatestTopicFromTarget(target: string): string | undefined {
     }
 }
 
-export function resolveNotificationTopic(webhook_notification_data: any, target?: string): string | undefined {
+export function resolveNotificationTopic(webhook_notification_data: any, target?: string, allowExactTopic: boolean = false): string | undefined {
     if (typeof webhook_notification_data?.topic === 'string' && webhook_notification_data.topic.length > 0) {
         const explicitTopic = normalizeTopic(webhook_notification_data.topic) ?? webhook_notification_data.topic;
+        if (allowExactTopic && webhook_notification_data?.use_exact_topic === true) {
+            return explicitTopic;
+        }
         // For source-stream notifications, always consume through the derived/latest endpoint.
         const inferredFromTopic = inferDerivedLatestTopicFromTarget(explicitTopic);
         if (inferredFromTopic) {

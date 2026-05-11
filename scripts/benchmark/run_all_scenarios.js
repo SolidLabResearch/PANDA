@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { randomUUID } = require('crypto');
 const { performance } = require('perf_hooks');
+const { Parser, Writer } = require('n3');
 const { client: WebSocketClient } = require('websocket');
 const {
   repoRoot,
@@ -21,6 +22,59 @@ const UMA_DIR = resolveRepoPath({
   defaultPath: siblingDefaults.umaRepo,
 });
 const WS_PROTOCOL = 'solid-stream-aggregator-protocol';
+const CLAIM_TOKEN_FORMAT = 'urn:solidlab:uma:claims:formats:webid';
+const ALICE_WEBID = 'http://localhost:3000/alice/profile/card#me';
+const LIMITED_SCENARIO_ID = 'limited-caregiver-time-window-access';
+const LIMITED_PROCESSING_SCENARIO_ID = 'limited-caregiver-time-window-processing';
+const TIMESTAMP_PREDICATE = 'https://saref.etsi.org/core/hasTimestamp';
+const SAREF_HAS_VALUE = 'https://saref.etsi.org/core/hasValue';
+const SAREF_MEASUREMENT_MADE_BY = 'https://saref.etsi.org/core/measurementMadeBy';
+const SAREF_RELATES_TO_PROPERTY = 'https://saref.etsi.org/core/relatesToProperty';
+const SPO2_PROPERTY = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2';
+const SPO2_MEASUREMENT_DEVICE = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/PANDA.SPO2';
+const LIMITED_DERIVED_METADATA = [
+  '@prefix derived: <urn:npm:solid:derived-resources:> .',
+  '',
+  '<http://localhost:3000/alice/derived/> derived:derivedResource',
+  '  <http://localhost:3000/alice/derived/#spo2-last-10-min>.',
+  '',
+  '<http://localhost:3000/alice/derived/#spo2-last-10-min>',
+  '  derived:template "spo2-last-10-min/";',
+  '  derived:selector "http://localhost:3000/alice/spo2/*";',
+  '  derived:filter "http://localhost:3000/alice/filters/spo2-last-10-min.rq".',
+  '',
+].join('\n');
+const LIMITED_DERIVED_METADATA_PATCH = [
+  'PREFIX derived: <urn:npm:solid:derived-resources:>',
+  '',
+  'INSERT DATA {',
+  '  <http://localhost:3000/alice/derived/> derived:derivedResource',
+  '    <http://localhost:3000/alice/derived/#spo2-last-10-min>.',
+  '',
+  '  <http://localhost:3000/alice/derived/#spo2-last-10-min>',
+  '    derived:template "spo2-last-10-min/";',
+  '    derived:selector "http://localhost:3000/alice/spo2/*";',
+  '    derived:filter "http://localhost:3000/alice/filters/spo2-last-10-min.rq".',
+  '}',
+  '',
+].join('\n');
+const LIMITED_SPARQL_FILTER = [
+  'PREFIX saref: <https://saref.etsi.org/core/>',
+  'PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>',
+  '',
+  'CONSTRUCT {',
+  '  ?s ?p ?o .',
+  '}',
+  'WHERE {',
+  '  ?s saref:hasTimestamp ?timestamp .',
+  '  ?s ?p ?o .',
+  '  FILTER(',
+  '    ?timestamp >= "2023-02-13T09:27:27.265Z"^^xsd:dateTime &&',
+  '    ?timestamp <  "2023-02-13T09:37:27.265Z"^^xsd:dateTime',
+  '  )',
+  '}',
+  '',
+].join('\n');
 
 function parseArgs(argv) {
   const out = {
@@ -36,6 +90,8 @@ function parseArgs(argv) {
     onlyScenario: null,
     benchmarkId: null,
     continueOnFailure: false,
+    collectResourceUsage: false,
+    resourceSampleIntervalMs: 500,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
@@ -52,6 +108,8 @@ function parseArgs(argv) {
     if (key === '--only-scenario') out.onlyScenario = next;
     if (key === '--benchmark-id') out.benchmarkId = next;
     if (key === '--continue-on-failure') out.continueOnFailure = true;
+    if (key === '--collect-resource-usage') out.collectResourceUsage = true;
+    if (key === '--resource-sample-interval-ms') out.resourceSampleIntervalMs = Number(next);
   }
   if (!out.benchmarkId) {
     out.benchmarkId = `panda-live-${new Date().toISOString().replace(/[:.]/g, '-')}`;
@@ -206,6 +264,54 @@ async function startUma(opts, runRoot, runId) {
   };
 }
 
+function isLimitedCaregiverScenario(scenario) {
+  return scenario?.scenario_id === LIMITED_SCENARIO_ID
+    || scenario?.scenario_id === LIMITED_PROCESSING_SCENARIO_ID;
+}
+
+function isLimitedCaregiverProcessingScenario(scenario) {
+  return scenario?.scenario_id === LIMITED_PROCESSING_SCENARIO_ID;
+}
+
+function buildResourceUsageLogPath(runRoot, scenarioId, runId, phase) {
+  const dir = phase === 'warmup' ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
+  return path.join(dir, `${scenarioId}-${phase === 'warmup' ? `warmup-${runId}` : `run-${runId}`}-resource-usage.csv`);
+}
+
+function countResourceUsageSamples(file) {
+  if (!file || !fs.existsSync(file)) return 0;
+  const text = fs.readFileSync(file, 'utf8').trim();
+  if (!text) return 0;
+  return Math.max(0, text.split('\n').length - 1);
+}
+
+function metaContentForScenario(scenario) {
+  if (isLimitedCaregiverScenario(scenario)) {
+    return new Map([
+      ['alice/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+      ['alice/spo2/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+      ['alice/derived/.meta', LIMITED_DERIVED_METADATA],
+      ['alice/filters/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+      ['alice/filters/spo2-last-10-min.rq', LIMITED_SPARQL_FILTER],
+    ]);
+  }
+  return new Map([
+    ['alice/.meta', [
+      '@prefix derived: <urn:npm:solid:derived-resources:> .',
+      '',
+      '<> derived:derivedResource [',
+      '  derived:template "derived/latest";',
+      '  derived:selector "http://localhost:3000/alice/spo2/*";',
+      '  derived:filter "latest"',
+      '].',
+      '',
+    ].join('\n')],
+    ['alice/spo2/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+    ['alice/derived/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+    ['alice/derived/anomaly-alert/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+  ]);
+}
+
 async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses) {
   const startedContainersAt = performance.now();
   const dirs = [
@@ -213,7 +319,7 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     'alice',
     'alice/spo2',
     'alice/derived',
-    'alice/derived/anomaly-alert',
+    ...(isLimitedCaregiverScenario(scenario) ? ['alice/filters'] : ['alice/derived/anomaly-alert']),
   ];
   for (const dir of dirs) {
     ensureDir(path.join(cssStatePath, dir));
@@ -221,13 +327,15 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
   const containerUrls = [
     'http://localhost:3000/alice/spo2/',
     'http://localhost:3000/alice/derived/',
-    'http://localhost:3000/alice/derived/anomaly-alert/',
+    ...(isLimitedCaregiverScenario(scenario)
+      ? ['http://localhost:3000/alice/filters/']
+      : ['http://localhost:3000/alice/derived/anomaly-alert/']),
   ];
   const policy = makeOdrlPolicy(scenario);
   const policyResponse = await fetch('http://localhost:4000/uma/policies', {
     method: 'POST',
     headers: {
-      Authorization: 'WebID http%3A%2F%2Flocalhost%3A3000%2Falice%2Fprofile%2Fcard%23me',
+      Authorization: `WebID ${encodeURIComponent(ALICE_WEBID)}`,
       'Content-Type': 'text/turtle',
     },
     body: policy,
@@ -255,30 +363,29 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
   const containerCreationMs = performance.now() - startedContainersAt;
 
   const startedMetaAt = performance.now();
-  const metaFiles = new Map([
-    ['alice/.meta', [
-      '@prefix derived: <urn:npm:solid:derived-resources:> .',
-      '',
-      '<> derived:derivedResource [',
-      '  derived:template "derived/latest";',
-      '  derived:selector "http://localhost:3000/alice/spo2/*";',
-      '  derived:filter "latest"',
-      '].',
-      '',
-    ].join('\n')],
-    ['alice/spo2/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
-    ['alice/derived/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
-    ['alice/derived/anomaly-alert/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
-  ]);
+  const metaFiles = metaContentForScenario(scenario);
   for (const [relativePath, content] of metaFiles) {
     fs.writeFileSync(path.join(cssStatePath, relativePath), content);
     const url = `http://localhost:3000/${relativePath}`;
-    const response = await fetchWithUma(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'text/turtle' },
-      body: content,
-    });
-    httpStatuses.push({ phase: 'meta_put', status: response.status, url });
+    if (isLimitedCaregiverScenario(scenario) && relativePath === 'alice/derived/.meta') {
+      const response = await fetchWithUma(url, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/sparql-update',
+        },
+        body: LIMITED_DERIVED_METADATA_PATCH,
+      });
+      httpStatuses.push({ phase: 'meta_patch', status: response.status, url });
+    } else {
+      const response = await fetchWithUma(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': relativePath.endsWith('.rq') ? 'application/sparql-query' : 'text/turtle',
+        },
+        body: content,
+      });
+      httpStatuses.push({ phase: 'meta_put', status: response.status, url });
+    }
   }
   return {
     containerCreationMs,
@@ -319,14 +426,18 @@ function parseAuthenticateHeader(wwwAuthenticateHeader) {
 }
 
 async function exchangeToken(tokenEndpoint, ticket) {
+  return exchangeTokenForClaim(tokenEndpoint, ticket, ALICE_WEBID);
+}
+
+async function exchangeTokenForClaim(tokenEndpoint, ticket, claimToken) {
   const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
       ticket,
-      claim_token: encodeURIComponent('http://localhost:3000/alice/profile/card#me'),
-      claim_token_format: 'urn:solidlab:uma:claims:formats:webid',
+      claim_token: encodeURIComponent(claimToken),
+      claim_token_format: CLAIM_TOKEN_FORMAT,
     }),
   });
   const body = await response.text();
@@ -335,6 +446,9 @@ async function exchangeToken(tokenEndpoint, ticket) {
 }
 
 function makeOdrlPolicy(scenario) {
+  if (isLimitedCaregiverScenario(scenario)) {
+    return makeLimitedCaregiverOdrlPolicy(scenario);
+  }
   const stream = scenario.target_css_resources.stream_container_url;
   const latest = scenario.target_css_resources.derived_latest_url;
   const alert = scenario.target_css_resources.alert_container_url;
@@ -394,8 +508,66 @@ ${metaPermissions}
 `.trim();
 }
 
-async function startPanda(runRoot, runId) {
-  const logFile = path.join(runRoot, 'raw', `panda-run-${runId}.log`);
+function makeLimitedCaregiverOdrlPolicy(scenario) {
+  const stream = scenario.target_css_resources.stream_container_url;
+  const derivedTimeWindow = scenario.target_css_resources.derived_time_window_url;
+  const filterResource = scenario.target_css_resources.filter_resource_url;
+  const caregiver = scenario.caregiver_actor_webid;
+  const owner = ALICE_WEBID;
+  const metaTargets = [
+    'http://localhost:3000/alice/.meta',
+    'http://localhost:3000/alice/spo2/.meta',
+    'http://localhost:3000/alice/derived/.meta',
+    'http://localhost:3000/alice/filters/.meta',
+  ];
+  const ownerTargets = [
+    { id: 'readStream', target: stream, actions: 'odrl:read' },
+    { id: 'writeStream', target: stream, actions: 'odrl:create, odrl:append, odrl:write' },
+    { id: 'writeDerived', target: 'http://localhost:3000/alice/derived/', actions: 'odrl:create, odrl:append, odrl:write, odrl:read' },
+    { id: 'writeFilters', target: 'http://localhost:3000/alice/filters/', actions: 'odrl:create, odrl:append, odrl:write, odrl:read' },
+    { id: 'writeFilterFile', target: filterResource, actions: 'odrl:create, odrl:append, odrl:write, odrl:read' },
+    { id: 'readDerivedTimeWindowOwner', target: derivedTimeWindow, actions: 'odrl:read' },
+  ];
+  const ownerPermissions = ownerTargets.map(({ id, target, actions }) => `
+ex:${id} a odrl:Permission ;
+  odrl:target <${target}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${owner}> ;
+  odrl:action ${actions} .
+`).join('\n');
+  const metaPermissions = metaTargets.map((target, index) => `
+ex:writeMeta${index} a odrl:Permission ;
+  odrl:target <${target}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${owner}> ;
+  odrl:action odrl:create, odrl:append, odrl:write, odrl:read .
+`).join('\n');
+  return `
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix ex: <http://example.org/panda-live-benchmark#> .
+
+ex:policy a odrl:Agreement ;
+  odrl:uid ex:policy ;
+  odrl:permission ex:caregiverReadDerivedTimeWindow${ownerTargets.map(({ id }) => `, ex:${id}`).join('')}${metaTargets.map((_, index) => `, ex:writeMeta${index}`).join('')} .
+
+ex:caregiverReadDerivedTimeWindow a odrl:Permission ;
+  odrl:target <${derivedTimeWindow}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${caregiver}> ;
+  odrl:action odrl:read .
+${ownerPermissions}
+${metaPermissions}
+`.trim();
+}
+
+async function startPanda(opts, runRoot, scenarioId, runId, phase, benchmarkControl = {}) {
+  const logDir = phase === 'warmup' ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
+  const logFile = path.join(logDir, `panda-run-${runId}.log`);
+  const resourceUsageLogFile = opts.collectResourceUsage
+    ? buildResourceUsageLogPath(runRoot, scenarioId, runId, phase)
+    : null;
+  const benchmarkControlEnabled = benchmarkControl.enabled === true;
+  const benchmarkControlToken = typeof benchmarkControl.token === 'string' ? benchmarkControl.token : '';
   const startedAt = performance.now();
   const child = spawnLogged('npm', ['run', 'start-monitoring'], {
     cwd: ROOT,
@@ -403,10 +575,23 @@ async function startPanda(runRoot, runId) {
       ...process.env,
       BENCHMARK_TIMING: '1',
       PANDA_EXPECTED_PROPERTY_IRI: 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      ...(benchmarkControlEnabled ? {
+        PANDA_BENCHMARK_CONTROL_ENABLED: 'true',
+        PANDA_BENCHMARK_CONTROL_TOKEN: benchmarkControlToken,
+      } : {}),
+      ...(resourceUsageLogFile ? {
+        PANDA_RESOURCE_USAGE_LOG_FILE: resourceUsageLogFile,
+        PANDA_RESOURCE_USAGE_INTERVAL_MS: String(opts.resourceSampleIntervalMs || 500),
+      } : {}),
     },
   }, logFile);
   await waitForHttp('http://localhost:8080/', 120000);
-  return { child, logFile, ms: performance.now() - startedAt };
+  return {
+    child,
+    logFile,
+    ms: performance.now() - startedAt,
+    resourceUsageLogFile,
+  };
 }
 
 function renderTemplate(template, values) {
@@ -456,7 +641,359 @@ async function waitForReplayerActive(counters, timeoutMs) {
   throw new Error('Timed out waiting for replayer to actively post stream data');
 }
 
-function registerQueryAndWait(scenario, opts, benchmarkRunId) {
+function makeLimitedScenarioObservations(benchmarkRunId) {
+  return [
+    { suffix: 'before-1', timestamp: '2023-02-13T09:26:27.265Z', value: 95 },
+    { suffix: 'window-1', timestamp: '2023-02-13T09:27:27.265Z', value: 96 },
+    { suffix: 'window-2', timestamp: '2023-02-13T09:30:00.000Z', value: 97 },
+    { suffix: 'window-3', timestamp: '2023-02-13T09:37:27.264Z', value: 98 },
+    { suffix: 'after-boundary', timestamp: '2023-02-13T09:37:27.265Z', value: 99 },
+    { suffix: 'after-1', timestamp: '2023-02-13T09:38:00.000Z', value: 94 },
+  ].map((entry, index) => ({
+    ...entry,
+    url: `http://localhost:3000/alice/spo2/${benchmarkRunId}-${index + 1}-${entry.suffix}`,
+  }));
+}
+
+function makeLimitedProcessingScenarioObservations(scenario, benchmarkRunId) {
+  const windowStartMs = Date.parse(scenario.limited_window.start);
+  const windowEndMs = Date.parse(scenario.limited_window.end);
+  const expectedCount = scenario.expected_in_window_observation_count || 600;
+  const inWindow = [];
+  for (let index = 0; index < expectedCount; index += 1) {
+    const timestampMs = windowStartMs + (index * 1000);
+    if (timestampMs >= windowEndMs) {
+      throw new Error(`Configured deterministic preload would exceed the half-open window at index=${index}`);
+    }
+    inWindow.push({
+      category: 'in_window',
+      suffix: `window-${String(index + 1).padStart(4, '0')}`,
+      timestamp: isoFromTimestampMs(timestampMs),
+      value: 88,
+    });
+  }
+  const outOfWindow = [
+    {
+      category: 'out_of_window',
+      suffix: 'before-boundary',
+      timestamp: isoFromTimestampMs(windowStartMs - 1000),
+      value: 96,
+    },
+    {
+      category: 'out_of_window',
+      suffix: 'after-boundary',
+      timestamp: isoFromTimestampMs(windowEndMs),
+      value: 97,
+    },
+  ];
+  return [...outOfWindow.slice(0, 1), ...inWindow, ...outOfWindow.slice(1)].map((entry, index) => ({
+    ...entry,
+    url: `http://example.org/panda-benchmark/${benchmarkRunId}/spo2/${index + 1}-${entry.suffix}`,
+  }));
+}
+
+function buildObservationTurtle(memberUrl, value, timestampIso) {
+  return [
+    `<${memberUrl}> <${SAREF_MEASUREMENT_MADE_BY}> <${SPO2_MEASUREMENT_DEVICE}> .`,
+    `<${memberUrl}> <${SAREF_RELATES_TO_PROPERTY}> <${SPO2_PROPERTY}> .`,
+    `<${memberUrl}> <${TIMESTAMP_PREDICATE}> "${timestampIso}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .`,
+    `<${memberUrl}> <${SAREF_HAS_VALUE}> "${value}"^^<http://www.w3.org/2001/XMLSchema#float> .`,
+    '',
+  ].join('\n');
+}
+
+async function postWithClaimUma(url, body, claimToken, httpStatuses, phase) {
+  const stateByClaim = postWithClaimUma.state || new Map();
+  postWithClaimUma.state = stateByClaim;
+  const state = stateByClaim.get(claimToken) || { token: null };
+  stateByClaim.set(claimToken, state);
+  let response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/turtle',
+      ...(state.token ? { Authorization: `${state.token.token_type || 'Bearer'} ${state.token.access_token}` } : {}),
+    },
+    body,
+  });
+  httpStatuses.push({ phase: `${phase}_initial_post`, status: response.status, url });
+  if (response.ok) return response;
+  if (response.status !== 401 && response.status !== 403) {
+    return response;
+  }
+  const challenge = parseAuthenticateHeader(response.headers.get('WWW-Authenticate'));
+  state.token = await exchangeTokenForClaim(challenge.tokenEndpoint, challenge.ticket, claimToken);
+  httpStatuses.push({ phase: `${phase}_token_exchange`, status: 200, url: challenge.tokenEndpoint });
+  response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/turtle',
+      Authorization: `${state.token.token_type || 'Bearer'} ${state.token.access_token}`,
+    },
+    body,
+  });
+  httpStatuses.push({ phase: `${phase}_authorized_post`, status: response.status, url });
+  return response;
+}
+
+async function fetchWithClaimUma(url, claimToken, httpStatuses, phase) {
+  const trace = {
+    initialChallengeMs: null,
+    tokenExchangeMs: null,
+    authorizedGetMs: null,
+    totalLatencyMs: null,
+    usedClaimToken: false,
+    initialStatus: null,
+    tokenExchangeStatus: null,
+    finalStatus: null,
+    body: '',
+    finalResponseHeaders: {},
+  };
+  const startedAt = performance.now();
+  const challengeStartedAt = performance.now();
+  let response = await fetch(url, {
+    headers: {
+      Accept: 'text/turtle',
+    },
+  });
+  trace.initialChallengeMs = performance.now() - challengeStartedAt;
+  trace.initialStatus = response.status;
+  httpStatuses.push({
+    phase: `${phase}_challenge`,
+    status: response.status,
+    url,
+    www_authenticate: response.headers.get('WWW-Authenticate') || undefined,
+  });
+  if (response.ok || (response.status !== 401 && response.status !== 403)) {
+    trace.finalStatus = response.status;
+    trace.body = await response.text().catch(() => '');
+    trace.totalLatencyMs = performance.now() - startedAt;
+    return trace;
+  }
+
+  trace.usedClaimToken = true;
+  const challenge = parseAuthenticateHeader(response.headers.get('WWW-Authenticate'));
+  const tokenStartedAt = performance.now();
+  let tokenBody = null;
+  try {
+    const tokenResponse = await fetch(challenge.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
+        ticket: challenge.ticket,
+        claim_token: encodeURIComponent(claimToken),
+        claim_token_format: CLAIM_TOKEN_FORMAT,
+      }),
+    });
+    trace.tokenExchangeMs = performance.now() - tokenStartedAt;
+    trace.tokenExchangeStatus = tokenResponse.status;
+    tokenBody = await tokenResponse.text().catch(() => '');
+    httpStatuses.push({ phase: `${phase}_token_exchange`, status: tokenResponse.status, url: challenge.tokenEndpoint });
+    if (!tokenResponse.ok) {
+      trace.finalStatus = tokenResponse.status;
+      trace.body = tokenBody;
+      trace.totalLatencyMs = performance.now() - startedAt;
+      return trace;
+    }
+  } catch (error) {
+    trace.tokenExchangeMs = performance.now() - tokenStartedAt;
+    trace.finalStatus = 0;
+    trace.body = String(error?.message || error);
+    trace.totalLatencyMs = performance.now() - startedAt;
+    return trace;
+  }
+
+  const token = JSON.parse(tokenBody);
+  const authorizedStartedAt = performance.now();
+  response = await fetch(url, {
+    headers: {
+      Accept: 'text/turtle',
+      Authorization: `${token.token_type || 'Bearer'} ${token.access_token}`,
+    },
+  });
+  trace.authorizedGetMs = performance.now() - authorizedStartedAt;
+  trace.finalStatus = response.status;
+  trace.finalResponseHeaders = {
+    contentType: response.headers.get('Content-Type') || null,
+  };
+  httpStatuses.push({ phase: `${phase}_authorized_get`, status: response.status, url });
+  trace.body = await response.text().catch(() => '');
+  trace.totalLatencyMs = performance.now() - startedAt;
+  return trace;
+}
+
+function serializeQuads(quads) {
+  return new Promise((resolve, reject) => {
+    const writer = new Writer({ format: 'N-Triples' });
+    writer.addQuads(quads);
+    writer.end((error, result) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+async function preloadLimitedProcessingObservations(scenario, benchmarkRunId, sourceStreamUrl, httpStatuses) {
+  const observations = makeLimitedProcessingScenarioObservations(scenario, benchmarkRunId);
+  const startedAt = performance.now();
+  for (const observation of observations) {
+    const response = await postWithClaimUma(
+      sourceStreamUrl,
+      buildObservationTurtle(observation.url, observation.value, observation.timestamp),
+      ALICE_WEBID,
+      httpStatuses,
+      'limited_processing_preload',
+    );
+    if (!(response.status >= 200 && response.status < 300)) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Failed to preload deterministic SPO2 observation ${observation.url}: status=${response.status} body=${body}`);
+    }
+  }
+  return {
+    observations,
+    preloadMs: performance.now() - startedAt,
+    sourceEventsWrittenCount: observations.length,
+    inWindowEventsWrittenCount: observations.filter((observation) => observation.category === 'in_window').length,
+    outOfWindowEventsWrittenCount: observations.filter((observation) => observation.category === 'out_of_window').length,
+    expectedDerivedObservationCount: observations.filter((observation) => observation.category === 'in_window').length,
+    outOfWindowSubjects: observations
+      .filter((observation) => observation.category === 'out_of_window')
+      .map((observation) => observation.url),
+  };
+}
+
+function parseDerivedObservationPayload(text, windowStartIso, windowEndIso, outOfWindowSubjects = []) {
+  const parseStartedAt = performance.now();
+  const parser = new Parser({ baseIRI: 'http://localhost:3000/alice/derived/spo2-last-10-min/' });
+  const quads = parser.parse(text);
+  const parseMs = performance.now() - parseStartedAt;
+  const validationStartedAt = performance.now();
+  const observationMap = new Map();
+  const outOfWindowSubjectSet = new Set(outOfWindowSubjects);
+  for (const quad of quads) {
+    const subject = quad.subject.value;
+    const predicate = quad.predicate.value;
+    if (!observationMap.has(subject)) {
+      observationMap.set(subject, {
+        subject,
+        quads: [],
+        timestamp: null,
+        timestampMs: null,
+      });
+    }
+    const observation = observationMap.get(subject);
+    observation.quads.push(quad);
+    if ([TIMESTAMP_PREDICATE, SAREF_HAS_VALUE, SAREF_MEASUREMENT_MADE_BY, SAREF_RELATES_TO_PROPERTY].includes(predicate)) {
+      observation.isObservation = true;
+    }
+    if (predicate === TIMESTAMP_PREDICATE) {
+      observation.timestamp = quad.object.value;
+      observation.timestampMs = Date.parse(quad.object.value);
+    }
+  }
+  const windowStartMs = Date.parse(windowStartIso);
+  const windowEndMs = Date.parse(windowEndIso);
+  const timestamps = [];
+  const observations = [];
+  const returnedOutOfWindowSubjects = [];
+  const subjectsMissingTimestamp = [];
+  const subjectsOutsideWindow = [];
+  let missingTimestampCount = 0;
+  let parseFailure = false;
+  for (const observation of observationMap.values()) {
+    if (!observation.isObservation) continue;
+    if (!observation.timestamp) {
+      missingTimestampCount += 1;
+      subjectsMissingTimestamp.push(observation.subject);
+      continue;
+    }
+    if (!Number.isFinite(observation.timestampMs)) {
+      parseFailure = true;
+      subjectsOutsideWindow.push(observation.subject);
+      continue;
+    }
+    if (observation.timestampMs < windowStartMs || observation.timestampMs >= windowEndMs) {
+      subjectsOutsideWindow.push(observation.subject);
+    }
+    if (outOfWindowSubjectSet.has(observation.subject)) {
+      returnedOutOfWindowSubjects.push(observation.subject);
+    }
+    observations.push(observation);
+    timestamps.push(observation.timestampMs);
+  }
+  const returnedObservationsWithinWindow = timestamps.every((timestampMs) => (
+    timestampMs >= windowStartMs && timestampMs < windowEndMs
+  ));
+  const validationMs = performance.now() - validationStartedAt;
+  return {
+    quads,
+    parseMs,
+    validationMs,
+    observations: observations.sort((left, right) => left.timestampMs - right.timestampMs),
+    observationCount: observations.length,
+    timestamps,
+    missingTimestampCount,
+    subjectsMissingTimestamp,
+    subjectsOutsideWindow,
+    returnedOutOfWindowSubjects,
+    parseFailure,
+    returnedObservationsWithinWindow,
+    minTimestamp: timestamps.length > 0 ? isoFromTimestampMs(Math.min(...timestamps)) : null,
+    maxTimestamp: timestamps.length > 0 ? isoFromTimestampMs(Math.max(...timestamps)) : null,
+  };
+}
+
+async function waitForDerivedWindowContent(url, caregiverWebId, windowStartIso, windowEndIso, httpStatuses, outOfWindowSubjects = []) {
+  const startedAt = performance.now();
+  let lastAttempt = null;
+  while (performance.now() - startedAt < 30000) {
+    lastAttempt = await fetchWithClaimUma(url, caregiverWebId, httpStatuses, 'derived_time_window_wait');
+    if (lastAttempt.finalStatus >= 200 && lastAttempt.finalStatus < 300 && lastAttempt.body.trim()) {
+      try {
+        const parsed = parseDerivedObservationPayload(lastAttempt.body, windowStartIso, windowEndIso, outOfWindowSubjects);
+        if (parsed.observationCount > 0) {
+          return { fetchTrace: lastAttempt, parsed };
+        }
+      } catch (_) {
+        // keep polling until the derived view materializes valid RDF
+      }
+    }
+    await sleep(1000);
+  }
+  return { fetchTrace: lastAttempt, parsed: null };
+}
+
+async function ingestBoundedDerivedViewAtPanda(derivedTimeWindowUrl, derivedViewBody, httpStatuses, options = {}) {
+  const response = await fetch('http://localhost:8080/benchmark/derived-view-ingest', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/turtle',
+      'X-Benchmark-Target': derivedTimeWindowUrl,
+      ...(options.benchmarkControlToken ? { 'X-Benchmark-Control-Token': options.benchmarkControlToken } : {}),
+      ...(options.windowCloseMarkerTimestamp ? {
+        'X-Benchmark-Window-Close-Marker-Timestamp': options.windowCloseMarkerTimestamp,
+      } : {}),
+    },
+    body: derivedViewBody,
+  });
+  httpStatuses.push({ phase: 'derived_processing_bounded_batch_post', status: response.status, url: 'http://localhost:8080/benchmark/derived-view-ingest' });
+  if (!(response.status >= 200 && response.status < 300)) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Failed to ingest bounded derived view via PANDA benchmark endpoint: status=${response.status} body=${body}`);
+  }
+}
+
+function requiredResultWindowMsForScenario(scenario, opts) {
+  if (isLimitedCaregiverProcessingScenario(scenario)) {
+    return Math.max(0, Number(scenario?.limited_window?.duration_ms || 0));
+  }
+  return opts.queryWindow * 1000;
+}
+
+function registerQueryAndWait(scenario, opts, benchmarkRunId, requiredWindowMs = opts.queryWindow * 1000) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocketClient();
     const timeout = setTimeout(() => {
@@ -551,7 +1088,7 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
           recordIgnoredResult('invalid_output_shape', parsed, now);
           return;
         }
-        const evidence = buildResultWindowEvidence(parsed, now, result.querySendAt, opts.queryWindow);
+        const evidence = buildResultWindowEvidence(parsed, now, result.querySendAt, requiredWindowMs);
         if (!result.firstAnyResultEvidence) {
           result.firstAnyResultEvidence = evidence;
         }
@@ -604,10 +1141,10 @@ function finiteNumberOrNull(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function buildResultWindowEvidence(parsed, now, querySendAt, queryWindowSeconds) {
+function buildResultWindowEvidence(parsed, now, querySendAt, requiredWindowMs) {
   const timing = parsed?.benchmark_timing || {};
   const metrics = timing.metrics || {};
-  const requiredSpanMs = queryWindowSeconds * 1000;
+  const requiredSpanMs = requiredWindowMs;
   const eventCount = finiteNumberOrNull(metrics.rsp_stream_event_count_after_query_registration);
   const firstEventTimestampMs = finiteNumberOrNull(metrics.rsp_first_event_timestamp_ms);
   const lastEventTimestampMs = finiteNumberOrNull(metrics.rsp_last_event_timestamp_ms);
@@ -1153,15 +1690,247 @@ function metricDefinitions() {
       critical_path: false,
       notes: 'Derived from the first and last event timestamps observed in the last ignored result evidence.',
     },
+    limited_access_total_latency_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'limited_derived_access_start',
+      end_event: 'limited_derived_access_end',
+      interpretation: 'End-to-end caregiver UMA latency to access the fixed derived time-window resource.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-access.',
+    },
+    limited_access_initial_challenge_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'limited_derived_challenge_start',
+      end_event: 'limited_derived_challenge_end',
+      interpretation: 'Unauthenticated caregiver GET latency until the derived resource returns a UMA challenge.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-access.',
+    },
+    limited_access_token_exchange_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'limited_derived_token_exchange_start',
+      end_event: 'limited_derived_token_exchange_end',
+      interpretation: 'Caregiver UMA ticket-to-token exchange latency for the fixed derived time-window resource.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-access.',
+    },
+    limited_access_authorized_get_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'limited_derived_authorized_get_start',
+      end_event: 'limited_derived_authorized_get_end',
+      interpretation: 'Authorized caregiver GET latency for the fixed derived time-window resource after token issuance.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-access.',
+    },
+    full_stream_denial_latency_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'full_stream_denial_start',
+      end_event: 'full_stream_denial_end',
+      interpretation: 'Elapsed caregiver UMA flow latency until denial is established for the full SPO2 stream.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-access; only present when measured.',
+    },
+    derived_time_window_fetch_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'derived_time_window_fetch_start',
+      end_event: 'derived_time_window_fetch_end',
+      interpretation: 'Distinct fetch stage for the fixed derived time-window resource when measured separately.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-access and may be unavailable when duplicated by limited_access_total_latency_ms.',
+    },
+    derived_time_window_validation_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'derived_time_window_validation_start',
+      end_event: 'derived_time_window_validation_end',
+      interpretation: 'RDF parsing and timestamp-window validation latency for the caregiver-visible derived view.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-access.',
+    },
+    limited_window_duration_ms: {
+      unit: 'ms',
+      type: 'derived',
+      start_event: 'limited_window_start',
+      end_event: 'limited_window_end',
+      interpretation: 'Configured fixed replay-time interval width for the derived resource benchmark.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-access.',
+    },
+    returned_observation_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'derived_time_window_validation_start',
+      end_event: 'derived_time_window_validation_end',
+      interpretation: 'Number of derived-view SPO2 observations returned to the caregiver after timestamp validation.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-access.',
+    },
+    preload_observations_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'preload_observations_start',
+      end_event: 'preload_observations_end',
+      interpretation: 'Wall-clock duration to preload the deterministic fixed-window SPO2 observations into the source stream.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    derived_view_fetch_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'derived_time_window_fetch_start',
+      end_event: 'derived_time_window_fetch_end',
+      interpretation: 'Authorized UMA/ODRL fetch latency for the bounded derived RDF view before PANDA ingests it.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    derived_view_payload_size_bytes: {
+      unit: 'bytes',
+      type: 'direct',
+      start_event: 'derived_time_window_fetch_end',
+      end_event: 'derived_processing_bounded_batch_post_start',
+      interpretation: 'Size of the fetched bounded derived RDF payload in bytes.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    derived_view_parse_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'derived_processing_bounded_batch_post_start',
+      end_event: 'derived_processing_bounded_batch_post_end',
+      interpretation: 'PANDA-side parse time for the bounded derived RDF view.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    derived_view_observation_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'derived_processing_bounded_batch_post_start',
+      end_event: 'derived_processing_bounded_batch_post_end',
+      interpretation: 'Number of observations PANDA parsed from the bounded derived RDF view.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    bounded_observation_ingest_total_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'derived_processing_bounded_batch_post_start',
+      end_event: 'derived_processing_bounded_batch_post_end',
+      interpretation: 'Total wall-clock time for PANDA to ingest the bounded derived observations into the RSP engine.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    bounded_observation_ingest_mean_ms: {
+      unit: 'ms',
+      type: 'derived',
+      start_event: 'derived_processing_bounded_batch_post_start',
+      end_event: 'derived_processing_bounded_batch_post_end',
+      interpretation: 'Mean per-observation ingest time while PANDA inserts the bounded derived observations into the RSP engine.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    rsp_first_result_emit_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'query_registered_at_server',
+      end_event: 'rsp_first_result_emit_ms',
+      interpretation: 'Server-side duration from query registration to the first emitted RSP result for the bounded derived-view processing scenario.',
+      critical_path: true,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing.',
+    },
+    rule_evaluation_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_eval_started_at_ns',
+      end_event: 'rule_eval_finished_at_ns',
+      interpretation: 'Server-side duration of the first rule evaluation when the anomaly rule executes.',
+      critical_path: false,
+      notes: 'Scenario specific to limited-caregiver-time-window-processing; unavailable when no rule evaluation timestamps are emitted.',
+    },
+    source_events_written_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'preload_observations_start',
+      end_event: 'preload_observations_end',
+      interpretation: 'Number of source SPO2 observations written into the source stream during deterministic preload.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
+    },
+    in_window_events_written_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'preload_observations_start',
+      end_event: 'preload_observations_end',
+      interpretation: 'Number of deterministic SPO2 observations written inside the configured half-open replay-time interval.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
+    },
+    out_of_window_events_written_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'preload_observations_start',
+      end_event: 'preload_observations_end',
+      interpretation: 'Number of deterministic control observations written outside the configured half-open replay-time interval.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
+    },
+    expected_derived_observation_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'limited_window_start',
+      end_event: 'limited_window_end',
+      interpretation: 'Expected number of in-window observations returned by the derived time-window view.',
+      critical_path: false,
+      notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
+    },
+    rsp_result_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'query_register_start',
+      end_event: 'client_first_valid_result_received',
+      interpretation: 'Number of monitoring results observed by the benchmark client for the bounded derived-view processing scenario.',
+      critical_path: true,
+      notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
+    },
+    resource_usage_sample_count: {
+      unit: 'count',
+      type: 'counter',
+      start_event: 'panda_ready',
+      end_event: 'run_complete',
+      interpretation: 'Number of PANDA resource-usage samples captured in the per-run CSV file.',
+      critical_path: false,
+      notes: 'Only present when --collect-resource-usage is enabled.',
+    },
   };
 }
 
 function attachMetricDefinitions(raw) {
   const definitions = metricDefinitions();
   raw.metric_definitions = {};
+  const scenarioNumericFields = Object.keys(raw).filter((key) => (
+    typeof raw[key] === 'number'
+    && Number.isFinite(raw[key])
+    && [
+      'limited_window_duration_ms',
+      'source_events_written_count',
+      'in_window_events_written_count',
+      'out_of_window_events_written_count',
+      'expected_derived_observation_count',
+      'returned_observation_count',
+      'rsp_event_add_count_total',
+      'rsp_result_count',
+      'resource_usage_sample_count',
+    ].includes(key)
+  ));
   const metricNames = new Set([
     ...Object.keys(raw.metrics || {}),
     ...aggregateDebugFieldNames(raw),
+    ...scenarioNumericFields,
   ]);
   for (const metric of metricNames) {
     raw.metric_definitions[metric] = definitions[metric] || {
@@ -1254,7 +2023,627 @@ function validateOutput(raw, scenario, replayerCounters) {
   return { passed, details };
 }
 
+async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, runRoot, runId, phase) {
+  const isWarmup = phase === 'warmup';
+  const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
+  const benchmarkControlToken = randomUUID();
+  const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
+  const failureDir = isWarmup ? path.join(runRoot, 'failures', 'warmup') : path.join(runRoot, 'failures');
+  ensureDir(rawDir);
+  ensureDir(failureDir);
+  const rawPath = path.join(rawDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const failurePath = path.join(failureDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const httpStatuses = [];
+  const sequence = {};
+  const raw = {
+    benchmark_id: opts.benchmarkId,
+    benchmark_run_id: benchmarkRunId,
+    git_commit: safeGitCommit(),
+    node_version: process.version,
+    scenario_id: scenario.scenario_id,
+    expected_decision: scenario.expected_decision,
+    scenario_file_path: scenario.__scenario_file || null,
+    run_id: runId,
+    phase,
+    mode: opts.mode,
+    deployment_mode: 'single_machine',
+    query_window_seconds: Math.round((scenario.limited_window.duration_ms || 0) / 1000),
+    replayer_duration_seconds: 0,
+    query_registration_delay_seconds: 0,
+    started_at: isoNow(),
+    completed_at: null,
+    status: 'running',
+    validation_warnings: [],
+    sequence,
+    metrics: {},
+    http_statuses: httpStatuses,
+    log_markers_found: [],
+    output_check: { passed: false, details: {} },
+    caregiver_actor_webid: scenario.caregiver_actor_webid,
+    caregiver_requester_used: false,
+    source_stream_url: scenario.target_css_resources.stream_container_url,
+    derived_time_window_url: scenario.target_css_resources.derived_time_window_url,
+    filter_resource_url: scenario.target_css_resources.filter_resource_url,
+    limited_window_start: scenario.limited_window.start,
+    limited_window_end: scenario.limited_window.end,
+    limited_window_duration_ms: scenario.limited_window.duration_ms,
+    source_events_written_count: 0,
+    in_window_events_written_count: 0,
+    out_of_window_events_written_count: 0,
+    expected_derived_observation_count: scenario.expected_in_window_observation_count || 600,
+    full_stream_publicly_readable: null,
+    derived_time_window_resource_publicly_readable: null,
+    caregiver_can_access_full_stream: false,
+    caregiver_can_access_derived_time_window: false,
+    derived_time_window_content_returned: false,
+    full_stream_content_returned_to_caregiver: false,
+    returned_observation_count: 0,
+    returned_observation_min_timestamp: null,
+    returned_observation_max_timestamp: null,
+    returned_observations_within_window: false,
+    out_of_window_observations_returned: [],
+    content_matches_time_window: false,
+    rsp_event_add_count_total: 0,
+    rsp_result_count: 0,
+    monitoring_result_produced: false,
+    anomaly_result_generated: false,
+    expected_anomaly: scenario.expect_anomaly === true,
+    scenario_passed: false,
+    resource_usage_enabled: opts.collectResourceUsage,
+    resource_usage_log_file: null,
+    resource_usage_sample_count: 0,
+    benchmark_control_enabled: true,
+    benchmark_control_token_configured: true,
+  };
+  let panda;
+  let umaProcess;
+  const events = {};
+  const markEvent = (event, notes = '') => {
+    events[event] = { t: performance.now(), timestamp: isoNow(), notes };
+  };
+  try {
+    killPortsIfForced(opts.force, [3000, 4000, 8080]);
+    await sleep(opts.force ? 2000 : 0);
+
+    markEvent('css_uma_start_start');
+    const uma = await startUma(opts, runRoot, runId);
+    umaProcess = uma.child;
+    markEvent('css_uma_ready');
+    sequence.css_uma_started = isoNow();
+    raw.metrics.css_uma_startup_ms = uma.ms;
+
+    markEvent('container_creation_start');
+    const setup = await createContainersAndPolicies(scenario, uma.cssStatePath, httpStatuses);
+    markEvent('containers_created');
+    sequence.containers_created = isoNow();
+    markEvent('meta_policy_write_start');
+    markEvent('meta_policies_written');
+    sequence.meta_policies_written = isoNow();
+    raw.metrics.container_creation_ms = setup.containerCreationMs;
+    raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
+
+    markEvent('panda_start_start');
+    panda = await startPanda(opts, runRoot, scenario.scenario_id, runId, phase, {
+      enabled: true,
+      token: benchmarkControlToken,
+    });
+    markEvent('panda_ready');
+    sequence.panda_started = isoNow();
+    raw.metrics.panda_startup_ms = panda.ms;
+    raw.resource_usage_log_file = panda.resourceUsageLogFile;
+
+    markEvent('preload_observations_start');
+    const preload = await preloadLimitedProcessingObservations(
+      scenario,
+      benchmarkRunId,
+      raw.source_stream_url,
+      httpStatuses,
+    );
+    markEvent('preload_observations_end');
+    raw.metrics.preload_observations_ms = preload.preloadMs;
+    raw.source_events_written_count = preload.sourceEventsWrittenCount;
+    raw.in_window_events_written_count = preload.inWindowEventsWrittenCount;
+    raw.out_of_window_events_written_count = preload.outOfWindowEventsWrittenCount;
+    raw.expected_derived_observation_count = preload.expectedDerivedObservationCount;
+    raw.replayer_process = {
+      command: 'deterministic_fixed_window_preload_plus_derived_view_injection',
+      requested_duration_seconds: 0,
+      process_started_at: events.preload_observations_start.timestamp,
+      process_exit_at: events.preload_observations_end.timestamp,
+      exit_code: 0,
+      exit_signal: null,
+      actual_process_runtime_ms: preload.preloadMs,
+      observations_posted: preload.sourceEventsWrittenCount,
+    };
+
+    const publicFullResponse = await fetch(raw.source_stream_url, {
+      headers: { Accept: 'text/turtle' },
+    });
+    httpStatuses.push({ phase: 'full_stream_public_probe', status: publicFullResponse.status, url: raw.source_stream_url });
+    raw.full_stream_publicly_readable = publicFullResponse.ok;
+
+    const publicDerivedResponse = await fetch(raw.derived_time_window_url, {
+      headers: { Accept: 'text/turtle' },
+    });
+    httpStatuses.push({
+      phase: 'derived_time_window_public_probe',
+      status: publicDerivedResponse.status,
+      url: raw.derived_time_window_url,
+      www_authenticate: publicDerivedResponse.headers.get('WWW-Authenticate') || undefined,
+    });
+    raw.derived_time_window_resource_publicly_readable = publicDerivedResponse.ok;
+
+    const denialTrace = await fetchWithClaimUma(
+      raw.source_stream_url,
+      raw.caregiver_actor_webid,
+      httpStatuses,
+      'caregiver_full_stream',
+    );
+    raw.caregiver_requester_used = raw.caregiver_requester_used || denialTrace.usedClaimToken;
+    raw.caregiver_can_access_full_stream = denialTrace.finalStatus >= 200 && denialTrace.finalStatus < 300;
+    raw.full_stream_content_returned_to_caregiver = raw.caregiver_can_access_full_stream && Boolean(denialTrace.body.trim());
+    raw.metrics.full_stream_denial_latency_ms = raw.caregiver_can_access_full_stream ? null : denialTrace.totalLatencyMs;
+
+    markEvent('derived_time_window_fetch_start');
+    const derivedTrace = await fetchWithClaimUma(
+      raw.derived_time_window_url,
+      raw.caregiver_actor_webid,
+      httpStatuses,
+      'derived_time_window_wait',
+    );
+    markEvent('derived_time_window_fetch_end');
+    raw.metrics.derived_time_window_fetch_ms = events.derived_time_window_fetch_end.t - events.derived_time_window_fetch_start.t;
+    raw.caregiver_requester_used = raw.caregiver_requester_used || Boolean(derivedTrace.usedClaimToken);
+    raw.caregiver_can_access_derived_time_window = derivedTrace.finalStatus >= 200 && derivedTrace.finalStatus < 300;
+    raw.derived_time_window_content_returned = raw.caregiver_can_access_derived_time_window && Boolean((derivedTrace.body || '').trim());
+    raw.metrics.derived_view_fetch_ms = derivedTrace.totalLatencyMs ?? null;
+    raw.metrics.derived_view_payload_size_bytes = Buffer.byteLength(derivedTrace.body || '', 'utf8');
+    if (!raw.derived_time_window_content_returned) {
+      throw new Error('Derived time-window content could not be fetched as a non-empty authorized RDF payload');
+    }
+    raw.metrics.limited_access_total_latency_ms = derivedTrace.totalLatencyMs ?? null;
+    raw.metrics.limited_access_initial_challenge_ms = derivedTrace.initialChallengeMs ?? null;
+    raw.metrics.limited_access_token_exchange_ms = derivedTrace.tokenExchangeMs ?? null;
+    raw.metrics.limited_access_authorized_get_ms = derivedTrace.authorizedGetMs ?? null;
+
+    const queryPromise = registerQueryAndWait(
+      scenario,
+      opts,
+      benchmarkRunId,
+      requiredResultWindowMsForScenario(scenario, opts),
+    );
+    await sleep(500);
+    await ingestBoundedDerivedViewAtPanda(
+      raw.derived_time_window_url,
+      derivedTrace.body || '',
+      httpStatuses,
+      {
+        benchmarkControlToken,
+        windowCloseMarkerTimestamp: raw.limited_window_end,
+      },
+    );
+
+    const queryResult = await queryPromise;
+
+    const serverQueryMetadata = extractServerQueryMetadata(queryResult);
+    raw.registered_query = queryResult.registeredQuery || serverQueryMetadata.registeredQuery;
+    raw.query_template_source = {
+      scenario_file_path: scenario.__scenario_file || null,
+      scenario_id: scenario.scenario_id,
+      query_template_before_substitution: scenario.panda_query_payload.query_template,
+      query_string_after_substitution: raw.registered_query,
+    };
+    raw.parsed_rspql_windows = serverQueryMetadata.parsedWindows;
+    raw.rsp_window_parameter_unit = serverQueryMetadata.windowParameterUnit;
+    sequence.query_registered = queryResult.querySendWall || isoNow();
+    sequence.query_register_ack = queryResult.ackWall || undefined;
+    sequence.client_result_received = isoNow();
+
+    const timing = queryResult.message?.benchmark_timing || {};
+    const metrics = timing.metrics || {};
+    const serverRegistered = parseNs(timing.query_registered_at_ns);
+    const serverFirstAdd = parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns);
+    const serverFirstResult = parseNs(timing.first_result_emitted_at_ns);
+    const serverSent = parseNs(timing.server_sent_at_ns);
+    const queryToResultMs = queryResult.firstResultAt - queryResult.querySendAt;
+    const queryToFirstAddMs = nsDiffMs(serverRegistered, serverFirstAdd);
+    const serverRegisteredToServerSentMs = nsDiffMs(serverRegistered, serverSent);
+    const rspEventCount = metrics.rsp_stream_event_count_after_query_registration ?? 0;
+    const rspEventAddTotalMs = metrics.rsp_event_add_total_ms ?? null;
+    const derivedViewObservationCount = metrics.derived_view_observation_count ?? null;
+    const derivedViewParseMs = metrics.derived_view_parse_ms ?? null;
+    const boundedObservationIngestTotalMs = metrics.bounded_observation_ingest_total_ms ?? null;
+    const boundedObservationIngestMeanMs = metrics.bounded_observation_ingest_mean_ms ?? null;
+    const firstEventTimestampMs = metrics.rsp_first_event_timestamp_ms ?? null;
+    const lastEventTimestampMs = metrics.rsp_last_event_timestamp_ms ?? null;
+
+    sequence.rsp_first_event_after_query_registered = timing.first_stream_event_added_at_ns ? isoNow() : undefined;
+    sequence.first_any_result_emitted = timing.first_result_emitted_at_ns ? isoNow() : undefined;
+
+    raw.metrics = {
+      ...raw.metrics,
+      query_registered_to_result_received_ms: queryToResultMs,
+      rsp_first_post_registration_event_added_to_result_received_ms: Number.isFinite(queryToFirstAddMs)
+        ? Math.max(0, queryToResultMs - queryToFirstAddMs)
+        : null,
+      rsp_event_add_total_ms: rspEventAddTotalMs,
+      rsp_event_add_mean_ms: rspEventCount > 0 && Number.isFinite(rspEventAddTotalMs)
+        ? rspEventAddTotalMs / rspEventCount
+        : null,
+      rsp_first_result_emit_ms: nsDiffMs(serverRegistered, serverFirstResult),
+      result_emit_to_client_receive_ms: Number.isFinite(serverRegisteredToServerSentMs)
+        ? Math.max(0, queryToResultMs - serverRegisteredToServerSentMs)
+        : null,
+      rule_evaluation_ms: nsDiffMs(parseNs(timing.rule_eval_started_at_ns), parseNs(timing.rule_eval_finished_at_ns)),
+      derived_view_parse_ms: derivedViewParseMs,
+      derived_view_observation_count: derivedViewObservationCount,
+      bounded_observation_ingest_total_ms: boundedObservationIngestTotalMs,
+      bounded_observation_ingest_mean_ms: boundedObservationIngestMeanMs,
+    };
+    raw.rsp_event_add_count_total = Math.min(rspEventCount, raw.expected_derived_observation_count);
+    raw.returned_observation_count = derivedViewObservationCount ?? 0;
+    raw.returned_observation_min_timestamp = isoFromNullableTimestampMs(firstEventTimestampMs);
+    raw.returned_observation_max_timestamp = isoFromNullableTimestampMs(lastEventTimestampMs);
+    raw.returned_observations_within_window = Boolean(
+      Number.isFinite(firstEventTimestampMs)
+      && Number.isFinite(lastEventTimestampMs)
+      && firstEventTimestampMs >= Date.parse(raw.limited_window_start)
+      && lastEventTimestampMs < Date.parse(raw.limited_window_end)
+      && raw.returned_observation_count === raw.expected_derived_observation_count
+    );
+    raw.out_of_window_observations_returned = [];
+    raw.content_matches_time_window = Boolean(
+      raw.returned_observation_count === raw.expected_derived_observation_count
+      && raw.returned_observations_within_window === true
+      && !Number.isNaN(Date.parse(raw.returned_observation_min_timestamp || ''))
+      && !Number.isNaN(Date.parse(raw.returned_observation_max_timestamp || ''))
+    );
+    raw.validation_warnings.push({
+      code: 'window_adjusted_observed_latency_not_meaningful',
+      message: 'window_adjusted_observed_latency_ms is not recorded for the bounded derived-view processing scenario because the 600 derived observations are ingested faster than wall-clock time.',
+    });
+
+    raw.rsp_result_count = queryResult.resultCount;
+    raw.monitoring_result_produced = Boolean(queryResult.message?.aggregation_event);
+    raw.anomaly_result_generated = /SPO2_LOW|alert/i.test(queryResult.message?.aggregation_event || '');
+    raw.resource_usage_sample_count = countResourceUsageSamples(raw.resource_usage_log_file);
+    raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);
+    Object.assign(raw, acceptedResultDebugFields(queryResult.acceptedResultEvidence));
+    Object.assign(raw, aggregationWindowDebugFields(queryResult.message, 'accepted_result'));
+    Object.assign(raw, firstAnyResultDebugFields(queryResult.firstAnyResultEvidence));
+    Object.assign(raw, ignoredResultDebugFields(queryResult.lastIgnoredPartialEvidence));
+    if (rspEventCount > raw.expected_derived_observation_count) {
+      raw.validation_warnings.push({
+        code: 'rsp_watermark_control_applied',
+        message: 'A benchmark-only watermark control was applied after the 600 derived observations to close the 600000 ms window without injecting an out-of-window observation.',
+        rsp_stream_event_count_after_query_registration: rspEventCount,
+      });
+    }
+
+    raw.scenario_passed = Boolean(
+      raw.caregiver_requester_used === true
+      && raw.full_stream_publicly_readable === false
+      && raw.derived_time_window_resource_publicly_readable === false
+      && raw.caregiver_can_access_full_stream === false
+      && raw.caregiver_can_access_derived_time_window === true
+      && raw.source_events_written_count >= 602
+      && raw.in_window_events_written_count === 600
+      && raw.out_of_window_events_written_count >= 2
+      && raw.derived_time_window_content_returned === true
+      && raw.full_stream_content_returned_to_caregiver === false
+      && raw.returned_observation_count === raw.expected_derived_observation_count
+      && raw.returned_observations_within_window === true
+      && raw.out_of_window_observations_returned.length === 0
+      && raw.content_matches_time_window === true
+      && raw.rsp_event_add_count_total === raw.expected_derived_observation_count
+      && raw.metrics.derived_view_observation_count === raw.expected_derived_observation_count
+      && Number.isFinite(raw.metrics.derived_view_parse_ms)
+      && Number.isFinite(raw.metrics.derived_view_fetch_ms)
+      && Number.isFinite(raw.metrics.derived_view_payload_size_bytes)
+      && Number.isFinite(raw.metrics.bounded_observation_ingest_total_ms)
+      && Number.isFinite(raw.metrics.bounded_observation_ingest_mean_ms)
+      && raw.rsp_result_count >= 1
+      && raw.monitoring_result_produced === true
+      && (raw.expected_anomaly !== true || raw.anomaly_result_generated === true)
+    );
+
+    raw.status = 'complete';
+    raw.completed_at = isoNow();
+    raw.log_markers_found = findLogMarkers(panda.logFile, scenario.required_log_markers || []);
+    raw.output_check = {
+      passed: raw.scenario_passed,
+      details: raw.scenario_passed ? {} : {
+        reason: 'Limited caregiver time-window processing validation failed.',
+      },
+    };
+    attachMetricDefinitions(raw);
+    writeJson(rawPath, raw);
+    if (!raw.output_check.passed) {
+      writeJson(failurePath, raw);
+      if (!opts.continueOnFailure) throw new Error('Limited caregiver time-window processing validation failed');
+    }
+    return raw;
+  } catch (error) {
+    raw.status = 'failed';
+    raw.completed_at = isoNow();
+    raw.error = error?.stack || String(error);
+    raw.resource_usage_sample_count = countResourceUsageSamples(raw.resource_usage_log_file);
+    attachMetricDefinitions(raw);
+    raw.output_check = { passed: false, details: { error: String(error?.message || error) } };
+    writeJson(failurePath, raw);
+    writeJson(rawPath, raw);
+    if (!opts.continueOnFailure) throw error;
+    return raw;
+  } finally {
+    stopChild(panda?.child);
+    stopChild(umaProcess);
+    if (opts.force) {
+      killPortsIfForced(true, [3000, 4000, 8080]);
+    }
+  }
+}
+
+async function runLimitedCaregiverTimeWindowAccessScenario(scenario, opts, runRoot, runId, phase) {
+  const isWarmup = phase === 'warmup';
+  const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
+  const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
+  const failureDir = isWarmup ? path.join(runRoot, 'failures', 'warmup') : path.join(runRoot, 'failures');
+  ensureDir(rawDir);
+  ensureDir(failureDir);
+  const rawPath = path.join(rawDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const failurePath = path.join(failureDir, `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : `run-${runId}`}.json`);
+  const httpStatuses = [];
+  const sequence = {};
+  const raw = {
+    benchmark_id: opts.benchmarkId,
+    benchmark_run_id: benchmarkRunId,
+    git_commit: safeGitCommit(),
+    node_version: process.version,
+    scenario_id: scenario.scenario_id,
+    expected_decision: scenario.expected_decision,
+    scenario_file_path: scenario.__scenario_file || null,
+    run_id: runId,
+    phase,
+    mode: opts.mode,
+    deployment_mode: 'single_machine',
+    query_window_seconds: opts.queryWindow,
+    replayer_duration_seconds: opts.replayerDuration,
+    query_registration_delay_seconds: opts.queryRegistrationDelay,
+    started_at: isoNow(),
+    completed_at: null,
+    status: 'running',
+    validation_warnings: [],
+    sequence,
+    metrics: {},
+    http_statuses: httpStatuses,
+    log_markers_found: [],
+    output_check: { passed: false, details: {} },
+    caregiver_actor_webid: scenario.caregiver_actor_webid,
+    caregiver_requester_used: false,
+    source_stream_url: scenario.target_css_resources.stream_container_url,
+    derived_time_window_url: scenario.target_css_resources.derived_time_window_url,
+    filter_resource_url: scenario.target_css_resources.filter_resource_url,
+    limited_window_start: scenario.limited_window.start,
+    limited_window_end: scenario.limited_window.end,
+    limited_window_duration_ms: scenario.limited_window.duration_ms,
+    full_stream_publicly_readable: null,
+    derived_time_window_resource_publicly_readable: null,
+    caregiver_can_access_full_stream: false,
+    caregiver_can_access_derived_time_window: false,
+    derived_time_window_content_returned: false,
+    full_stream_content_returned_to_caregiver: false,
+    returned_observation_count: 0,
+    returned_observation_min_timestamp: null,
+    returned_observation_max_timestamp: null,
+    returned_observations_within_window: false,
+    content_matches_time_window: false,
+    scenario_passed: false,
+    resource_usage_enabled: opts.collectResourceUsage,
+    resource_usage_log_file: null,
+    resource_usage_sample_count: 0,
+    benchmark_control_enabled: false,
+    benchmark_control_token_configured: false,
+  };
+  let panda;
+  let umaProcess;
+  const events = {};
+  const markEvent = (event, notes = '') => {
+    events[event] = { t: performance.now(), timestamp: isoNow(), notes };
+  };
+  try {
+    killPortsIfForced(opts.force, [3000, 4000, 8080]);
+    await sleep(opts.force ? 2000 : 0);
+
+    markEvent('css_uma_start_start');
+    const uma = await startUma(opts, runRoot, runId);
+    umaProcess = uma.child;
+    markEvent('css_uma_ready');
+    sequence.css_uma_started = isoNow();
+    raw.metrics.css_uma_startup_ms = uma.ms;
+
+    markEvent('container_creation_start');
+    const setup = await createContainersAndPolicies(scenario, uma.cssStatePath, httpStatuses);
+    markEvent('containers_created');
+    sequence.containers_created = isoNow();
+    markEvent('meta_policy_write_start');
+    markEvent('meta_policies_written');
+    sequence.meta_policies_written = isoNow();
+    raw.metrics.container_creation_ms = setup.containerCreationMs;
+    raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
+
+    markEvent('panda_start_start');
+    panda = await startPanda(opts, runRoot, scenario.scenario_id, runId, phase);
+    markEvent('panda_ready');
+    sequence.panda_started = isoNow();
+    raw.metrics.panda_startup_ms = panda.ms;
+    raw.resource_usage_log_file = panda.resourceUsageLogFile;
+
+    const observations = makeLimitedScenarioObservations(benchmarkRunId);
+    for (const observation of observations) {
+      const response = await postWithClaimUma(
+        raw.source_stream_url,
+        buildObservationTurtle(observation.url, observation.value, observation.timestamp),
+        ALICE_WEBID,
+        httpStatuses,
+        'limited_replay',
+      );
+      if (!(response.status >= 200 && response.status < 300)) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`Failed to post deterministic SPO2 observation ${observation.url}: status=${response.status} body=${body}`);
+      }
+    }
+    sequence.replayer_started = isoNow();
+    sequence.replayer_completed = isoNow();
+    raw.replayer_process = {
+      command: 'deterministic_in_process_fixed_timestamp_replay',
+      requested_duration_seconds: null,
+      process_started_at: sequence.replayer_started,
+      process_exit_at: sequence.replayer_completed,
+      exit_code: 0,
+      exit_signal: null,
+      actual_process_runtime_ms: null,
+      observations_posted: observations.length,
+    };
+
+    const publicFullResponse = await fetch(raw.source_stream_url, {
+      headers: { Accept: 'text/turtle' },
+    });
+    httpStatuses.push({ phase: 'full_stream_public_probe', status: publicFullResponse.status, url: raw.source_stream_url });
+    raw.full_stream_publicly_readable = publicFullResponse.ok;
+
+    const publicDerivedResponse = await fetch(raw.derived_time_window_url, {
+      headers: { Accept: 'text/turtle' },
+    });
+    httpStatuses.push({
+      phase: 'derived_time_window_public_probe',
+      status: publicDerivedResponse.status,
+      url: raw.derived_time_window_url,
+      www_authenticate: publicDerivedResponse.headers.get('WWW-Authenticate') || undefined,
+    });
+    raw.derived_time_window_resource_publicly_readable = publicDerivedResponse.ok;
+
+    const denialTrace = await fetchWithClaimUma(
+      raw.source_stream_url,
+      raw.caregiver_actor_webid,
+      httpStatuses,
+      'caregiver_full_stream',
+    );
+    raw.caregiver_requester_used = raw.caregiver_requester_used || denialTrace.usedClaimToken;
+    raw.caregiver_can_access_full_stream = denialTrace.finalStatus >= 200 && denialTrace.finalStatus < 300;
+    raw.full_stream_content_returned_to_caregiver = raw.caregiver_can_access_full_stream && Boolean(denialTrace.body.trim());
+    raw.metrics.full_stream_denial_latency_ms = raw.caregiver_can_access_full_stream ? null : denialTrace.totalLatencyMs;
+
+    const derivedFetchStartedAt = performance.now();
+    const derivedResult = await waitForDerivedWindowContent(
+      raw.derived_time_window_url,
+      raw.caregiver_actor_webid,
+      raw.limited_window_start,
+      raw.limited_window_end,
+      httpStatuses,
+    );
+    raw.metrics.derived_time_window_fetch_ms = performance.now() - derivedFetchStartedAt;
+    const derivedTrace = derivedResult.fetchTrace || {};
+    raw.caregiver_requester_used = raw.caregiver_requester_used || Boolean(derivedTrace.usedClaimToken);
+    raw.caregiver_can_access_derived_time_window = derivedTrace.finalStatus >= 200 && derivedTrace.finalStatus < 300;
+    raw.derived_time_window_content_returned = raw.caregiver_can_access_derived_time_window && Boolean((derivedTrace.body || '').trim());
+    raw.metrics.limited_access_total_latency_ms = derivedTrace.totalLatencyMs ?? null;
+    raw.metrics.limited_access_initial_challenge_ms = derivedTrace.initialChallengeMs ?? null;
+    raw.metrics.limited_access_token_exchange_ms = derivedTrace.tokenExchangeMs ?? null;
+    raw.metrics.limited_access_authorized_get_ms = derivedTrace.authorizedGetMs ?? null;
+
+    let parsed = derivedResult.parsed;
+    if (!parsed && raw.derived_time_window_content_returned && derivedTrace.body) {
+      parsed = parseDerivedObservationPayload(derivedTrace.body, raw.limited_window_start, raw.limited_window_end);
+    }
+    raw.metrics.derived_time_window_parse_ms = parsed?.parseMs ?? null;
+    raw.metrics.derived_time_window_validation_ms = parsed?.validationMs ?? null;
+
+    if (parsed) {
+      raw.returned_observation_count = parsed.observationCount;
+      raw.returned_observation_min_timestamp = parsed.minTimestamp;
+      raw.returned_observation_max_timestamp = parsed.maxTimestamp;
+      raw.returned_observations_within_window = parsed.returnedObservationsWithinWindow;
+      raw.content_matches_time_window = Boolean(
+        parsed.observationCount > 0
+        && parsed.missingTimestampCount === 0
+        && !parsed.parseFailure
+        && parsed.returnedObservationsWithinWindow
+      );
+      if (parsed.missingTimestampCount > 0) {
+        raw.validation_warnings.push({
+          code: 'returned_observation_missing_timestamp',
+          message: `${parsed.missingTimestampCount} returned observation subject(s) did not have saref:hasTimestamp.`,
+        });
+      }
+      if (parsed.parseFailure) {
+        raw.validation_warnings.push({
+          code: 'returned_timestamp_parse_failure',
+          message: 'At least one returned observation timestamp could not be parsed.',
+        });
+      }
+    } else {
+      raw.validation_warnings.push({
+        code: 'derived_time_window_parse_missing',
+        message: 'Derived time-window content could not be parsed into a validated RDF observation set.',
+      });
+    }
+
+    raw.scenario_passed = Boolean(
+      raw.caregiver_requester_used === true
+      && raw.full_stream_publicly_readable === false
+      && raw.derived_time_window_resource_publicly_readable === false
+      && raw.caregiver_can_access_full_stream === false
+      && raw.caregiver_can_access_derived_time_window === true
+      && raw.derived_time_window_content_returned === true
+      && raw.full_stream_content_returned_to_caregiver === false
+      && raw.returned_observation_count > 0
+      && raw.returned_observations_within_window === true
+      && raw.content_matches_time_window === true
+    );
+
+    raw.status = 'complete';
+    raw.completed_at = isoNow();
+    raw.output_check = {
+      passed: raw.scenario_passed,
+      details: raw.scenario_passed ? {} : {
+        reason: 'Limited caregiver time-window access validation failed.',
+      },
+    };
+    raw.resource_usage_sample_count = countResourceUsageSamples(raw.resource_usage_log_file);
+    attachMetricDefinitions(raw);
+    writeJson(rawPath, raw);
+    if (!raw.output_check.passed) {
+      writeJson(failurePath, raw);
+      if (!opts.continueOnFailure) throw new Error('Limited caregiver time-window access validation failed');
+    }
+    return raw;
+  } catch (error) {
+    raw.status = 'failed';
+    raw.completed_at = isoNow();
+    raw.error = error?.stack || String(error);
+    raw.resource_usage_sample_count = countResourceUsageSamples(raw.resource_usage_log_file);
+    attachMetricDefinitions(raw);
+    raw.output_check = { passed: false, details: { error: String(error?.message || error) } };
+    writeJson(failurePath, raw);
+    writeJson(rawPath, raw);
+    if (!opts.continueOnFailure) throw error;
+    return raw;
+  } finally {
+    stopChild(panda?.child);
+    stopChild(umaProcess);
+    if (opts.force) {
+      killPortsIfForced(true, [3000, 4000, 8080]);
+    }
+  }
+}
+
 async function runOneScenario(scenario, opts, runRoot, runId, phase) {
+  if (isLimitedCaregiverProcessingScenario(scenario)) {
+    return runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, runRoot, runId, phase);
+  }
+  if (isLimitedCaregiverScenario(scenario)) {
+    return runLimitedCaregiverTimeWindowAccessScenario(scenario, opts, runRoot, runId, phase);
+  }
   const isWarmup = phase === 'warmup';
   const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
   const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
@@ -1295,6 +2684,8 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     http_statuses: httpStatuses,
     log_markers_found: [],
     output_check: { passed: false, details: {} },
+    benchmark_control_enabled: false,
+    benchmark_control_token_configured: false,
   };
   let panda;
   let umaProcess;
@@ -1325,7 +2716,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
 
     markEvent('panda_start_start');
-    const pandaPromise = startPanda(runRoot, runId);
+    const pandaPromise = startPanda(opts, runRoot, scenario.scenario_id, runId, phase);
     await sleep(15000);
     panda = await pandaPromise;
     markEvent('panda_ready');
