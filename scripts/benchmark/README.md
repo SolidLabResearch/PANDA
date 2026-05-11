@@ -243,6 +243,52 @@ Override env vars:
 
 The strict runner requires live `OdrlAuthorizer` evaluation evidence from `PANDA_UMA_ODRL_LOG_FILE` and fails hard if this proof is missing.
 
+## ODRL policy-graph size benchmark
+
+Benchmark name: `odrl-policy-graph-size`
+
+Generate benchmark policy sets (non-destructive, does not edit UMA `policy0.ttl`):
+
+```bash
+npm run benchmark:odrl-policy-graph-size:generate
+```
+
+Run the benchmark only:
+
+```bash
+npm run benchmark:odrl-policy-graph-size
+```
+
+Managed mode is the default. The runner starts and stops only the UMA/CSS stack needed for this benchmark, waits for readiness (`:4000` UMA config, `:3000` CSS host, protected `alice/spo2/`, and policy endpoint), then runs.
+
+Run unmanaged mode (assumes services are already running):
+
+```bash
+npm run benchmark:odrl-policy-graph-size -- --no-managed-stack
+```
+
+Unmanaged mode requires:
+
+- UMA authorization server reachable at `http://localhost:4000/uma`
+- CSS/Solid Pod reachable at `http://localhost:3000/`
+- Protected SPO2 resource reachable at `http://localhost:3000/alice/spo2/`
+- Policy endpoint reachable at `http://localhost:4000/uma/policies`
+
+CLI notes:
+
+- `--runs`, `--warmup`, and `--policy-counts` are supported.
+- `--policy-counts` accepts comma-separated values, for example `--policy-counts 1,5,10`.
+- `policy0.ttl` is preserved unchanged; the benchmark never modifies or deletes it.
+- Generated benchmark policies are written under `benchmarks/generated/odrl-policy-graph-size/` and loaded in addition to existing policies.
+- Before each policy-count level, previously generated benchmark policies are removed by UID so levels do not accumulate (`1`, `5`, `10`, ... are not cumulative).
+- Each warm-up and measured iteration performs a fresh UMA flow (challenge -> token exchange -> authorized GET) with no token reuse across iterations.
+
+Validate one benchmark summary:
+
+```bash
+npm run benchmark:odrl-policy-graph-size:validate -- --summary /absolute/path/to/odrl-policy-graph-size-<run-id>.summary.json
+```
+
 ### Scenario matrix runner
 
 Run a reproducible benchmark matrix:

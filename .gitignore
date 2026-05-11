@@ -131,6 +131,7 @@ coverage/
 # Benchmark generated outputs
 benchmarks/results/runs/
 benchmarks/results/environment/
+benchmarks/generated/odrl-policy-graph-size/
 
 # Runtime/generated local data
 query_audit_log.json
