@@ -116,6 +116,21 @@ function main() {
   }
 
   const metrics = {};
+  const criticalPathMetricOrder = [
+    'replayer_start_to_query_register_ms',
+    'query_registered_to_result_received_ms',
+    'end_to_end_replayer_to_rsp_output_ms',
+    'rsp_output_to_panda_result_write_ms',
+    'panda_result_write_total_ms',
+    'panda_result_write_to_notification_ms',
+    'nurse_notification_to_uma_get_start_ms',
+    'nurse_result_uma_challenge_ms',
+    'nurse_result_token_exchange_ms',
+    'nurse_result_authorized_get_ms',
+    'nurse_result_total_read_ms',
+    'query_registration_to_nurse_result_read_ms',
+    'end_to_end_replayer_to_nurse_result_read_ms',
+  ];
   const lowerNMetrics = [];
   for (const metric of Array.from(metricNames).sort()) {
     const values = rows
@@ -203,6 +218,9 @@ function main() {
       first_any_result_classifications: Array.from(firstAnyResultClassifications).sort(),
       resource_samples: resourceWarnings,
     },
+    critical_path_metrics_in_order: criticalPathMetricOrder
+      .filter((metric) => metrics[metric])
+      .map((metric) => ({ metric, summary: metrics[metric] })),
     resource_metrics: resourceMetrics,
   };
   const outPath = path.join(runRoot, 'aggregated', 'summary.json');

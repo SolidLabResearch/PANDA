@@ -1,0 +1,56 @@
+{
+  "scenario_id": "uma-replayer-panda-derived-anomaly-e2e",
+  "description": "Protected benchmark where PANDA materializes the first full-window RSP result into a protected Solid resource and the run completes only after nurse notification plus UMA-authorized GET.",
+  "query_window_seconds": 60,
+  "replayer_duration_seconds": 120,
+  "query_registration_delay_after_replayer_start_seconds": 10,
+  "benchmark_mode": "protected_rsp_result",
+  "target_css_resources": {
+    "stream_container_url": "http://localhost:3000/alice/spo2/",
+    "derived_latest_url": "http://localhost:3000/alice/derived/latest",
+    "alert_container_url": "http://localhost:3000/alice/derived/anomaly-alert/",
+    "protected_rsp_result_container_url": "http://localhost:3000/alice/protected-rsp-results/"
+  },
+  "protected_result": {
+    "container_url": "http://localhost:3000/alice/protected-rsp-results/",
+    "resource_url_template": "http://localhost:3000/alice/protected-rsp-results/{benchmark_run_id}.ttl",
+    "owner_webid": "http://localhost:3000/alice/profile/card#me",
+    "nurse_webid": "http://localhost:3000/bob/profile/card#me"
+  },
+  "policy_meta_file_paths": [
+    "alice/.meta",
+    "alice/spo2/.meta",
+    "alice/derived/.meta",
+    "alice/derived/anomaly-alert/.meta",
+    "alice/protected-rsp-results/.meta"
+  ],
+  "panda_query_payload": {
+    "type": "live",
+    "actor_webid": "http://localhost:3000/alice/profile/card#me",
+    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (AVG(?o) AS ?avg)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE {query_window_ms} STEP 60000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
+    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" }. \n"
+  },
+  "replayer_command": "node scripts/benchmark/live_spo2_replayer.js --url http://localhost:3000/alice/spo2/ --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id}",
+  "expected_decision": "allow",
+  "expected_result_shape": {
+    "type": "websocket_json",
+    "required_fields": [
+      "query_hash",
+      "aggregation_event",
+      "benchmark_timing",
+      "protected_result"
+    ],
+    "aggregation_event_contains": [
+      "https://saref.etsi.org/core/hasValue",
+      "https://rsp.js/aggregation_event/"
+    ]
+  },
+  "required_log_markers": [
+    "HTTP Server started on port 8080",
+    "Subscription to the LDES Stream http://localhost:3000/alice/spo2/ was successful.",
+    "[VALIDATION][INGEST] event_added_to_rsp_engine",
+    "[VALIDATION][RSP] evaluation_tick",
+    "aggregation_event_sent_to_solid_stream_aggregator_websocket_server",
+    "[VALIDATION][PROTECTED_RESULT] write_response_received"
+  ]
+}

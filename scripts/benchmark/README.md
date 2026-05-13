@@ -249,6 +249,18 @@ Use the scenario harness to execute the full scenario matrix and write raw/aggre
 
 - `benchmarks/results/runs/<benchmark-id>/`
 
+### Protected RSP-result scenario
+
+`benchmarks/scenarios/10-uma-replayer-panda-derived-anomaly-e2e.json` extends the baseline live-window benchmark without changing the 60s query semantics:
+
+- the replayer writes source SpO2 observations
+- PANDA emits the first full-window RSP result
+- PANDA writes that result to `http://localhost:3000/alice/protected-rsp-results/<benchmark-run-id>.ttl`
+- the benchmark runner waits for the Solid notification on that protected resource
+- the benchmark completes only after the nurse/caregiver performs the UMA challenge, token exchange, and authorized GET
+
+The raw result JSON now records protected-resource diagnostics, notification status, ODRL proof status, and the returned protected result body excerpt.
+
 ### Resource usage collection (optional, Linux `/proc` based)
 
 Enable per-run resource sampling with:

@@ -28,6 +28,9 @@ export type BenchmarkTimingSnapshot = {
     first_stream_event_added_at_ns?: string;
     rsp_window_evaluated_at_ns?: string;
     first_result_emitted_at_ns?: string;
+    protected_result_source_emitted_at_ns?: string;
+    protected_result_write_started_at_ns?: string;
+    protected_result_write_completed_at_ns?: string;
     rule_eval_started_at_ns?: string;
     rule_eval_finished_at_ns?: string;
     server_sent_at_ns?: string;
@@ -56,6 +59,9 @@ export type BenchmarkServerMetrics = {
     rsp_events_added_with_other_benchmark_run_id_count?: number;
     rsp_query_eval_ms?: number;
     first_result_emit_ms?: number;
+    protected_result_write_attempts?: number;
+    protected_result_write_body_bytes?: number;
+    protected_result_write_status_code?: number;
 };
 
 export type BenchmarkTimingContext = {
@@ -82,6 +88,9 @@ type BenchmarkTimingNsKey =
     | 'first_stream_event_added_at_ns'
     | 'rsp_window_evaluated_at_ns'
     | 'first_result_emitted_at_ns'
+    | 'protected_result_source_emitted_at_ns'
+    | 'protected_result_write_started_at_ns'
+    | 'protected_result_write_completed_at_ns'
     | 'rule_eval_started_at_ns'
     | 'rule_eval_finished_at_ns'
     | 'server_sent_at_ns';

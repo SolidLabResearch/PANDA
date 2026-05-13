@@ -10,10 +10,9 @@ import { Credentials, aggregation_object } from "../../utils/Types";
 import { DataFactory, Parser } from "n3";
 import { NotificationStreamProcessor } from "./NotificationStreamProcessor";
 import { ContinuousAnomalyMonitoringService } from "../reasoner/ContinuousAnomalyMonitoringService";
-import { getUmaClaim } from "../../config/UmaClaim";
 import { parseAuthenticateHeader } from "../authorization/UserManagedAccessFetcher";
 import { performance } from "perf_hooks";
-import { BenchmarkTimingContext, addBenchmarkMetric, cloneBenchmarkTiming, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
+import { BenchmarkTimingContext, addBenchmarkMetric, cloneBenchmarkTiming, incrementBenchmarkMetric, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
 const WebSocketClient = require('websocket').client;
 const websocketConnection = require('websocket').connection;
 const parser = new RSPQLParser();
@@ -24,6 +23,13 @@ const parser = new RSPQLParser();
 export class AggregatorInstantiator {
     private static readonly LOW_SPO2_THRESHOLD = 90;
     private static readonly ALERT_CONTAINER = 'http://localhost:3000/alice/derived/anomaly-alert/';
+    private static readonly PROTECTED_RESULT_NS = 'http://example.org/panda-benchmark#';
+    private static readonly PROTECTED_RESULT_TYPE = 'http://example.org/panda-benchmark#ProtectedRspResult';
+    private static readonly PROTECTED_RESULT_URL_ENV = 'PANDA_BENCHMARK_PROTECTED_RESULT_URL';
+    private static readonly PROTECTED_RESULT_SCENARIO_ID_ENV = 'PANDA_BENCHMARK_SCENARIO_ID';
+    private static readonly OWNER_WRITE_CLAIM_TOKEN_ENV = 'PANDA_OWNER_WRITE_CLAIM_TOKEN';
+    private static readonly OWNER_WRITE_CLAIM_FORMAT_ENV = 'PANDA_OWNER_WRITE_CLAIM_TOKEN_FORMAT';
+    private static readonly DEFAULT_OWNER_WRITE_CLAIM_TOKEN = 'http://localhost:3000/alice/profile/card#me';
     private static readonly ALERT_PREFIX = 'http://example.org/alert#';
     private static readonly XSD_PREFIX = 'http://www.w3.org/2001/XMLSchema#';
     private static readonly ALICE_ALERT_WRITE_TOKEN_ENV = 'PANDA_ALICE_WRITE_TOKEN';
@@ -42,7 +48,10 @@ export class AggregatorInstantiator {
     public client = new WebSocketClient();
     public connection: typeof websocketConnection;
     private alertContainerInitialized = false;
+    private protectedResultContainerInitialized = false;
+    private protectedResultWritten = false;
     private fallbackAlertWriteAuthorizationHeader: string | null = null;
+    private readonly resourceAuthorizationHeaders = new Map<string, string>();
     private readonly auditContext?: QueryExecutionAuditContext;
     private readonly projectedVariables: string[];
     private readonly aggregationFunction: string;
@@ -198,13 +207,21 @@ export class AggregatorInstantiator {
                                 await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
                             }
                             this.recordFirstResultEmitDuration();
-                            const aggregation_object: aggregation_object = {
+                            const protectedResult = await this.maybeMaterializeProtectedRspResult({
+                                sourceEventUri,
+                                numericSpo2,
+                                windowTimestampFrom: window_timestamp_from,
+                                windowTimestampTo: window_timestamp_to,
+                                normalizedWindowMetadata: normalizedWindow.metadata,
+                            });
+                            const aggregation_object: aggregation_object & { protected_result?: Record<string, any> } = {
                                 query_hash: this.hash_string,
                                 aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                                 aggregation_window_from: new Date(window_timestamp_from),
                                 aggregation_window_to: new Date(window_timestamp_to),
                                 rsp_window_metadata: normalizedWindow.metadata,
                                 benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
+                                protected_result: protectedResult ?? undefined,
                             };
                             const aggregation_object_string = JSON.stringify(aggregation_object);
                             this.sendToServer(aggregation_object_string);
@@ -235,13 +252,21 @@ export class AggregatorInstantiator {
                             await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
                         }
                         this.recordFirstResultEmitDuration();
-                        const aggregation_object: aggregation_object = {
+                        const protectedResult = await this.maybeMaterializeProtectedRspResult({
+                            sourceEventUri,
+                            numericSpo2,
+                            windowTimestampFrom: window_timestamp_from,
+                            windowTimestampTo: window_timestamp_to,
+                            normalizedWindowMetadata: normalizedWindow.metadata,
+                        });
+                        const aggregation_object: aggregation_object & { protected_result?: Record<string, any> } = {
                             query_hash: this.hash_string,
                             aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
                             aggregation_window_from: new Date(window_timestamp_from),
                             aggregation_window_to: new Date(window_timestamp_to),
                             rsp_window_metadata: normalizedWindow.metadata,
                             benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
+                            protected_result: protectedResult ?? undefined,
                         };
                         const aggregation_object_string = JSON.stringify(aggregation_object);
                         this.sendToServer(aggregation_object_string);
@@ -708,6 +733,233 @@ export class AggregatorInstantiator {
         };
     }
 
+    private getProtectedResultUrl(): string | null {
+        const resourceUrl = process.env[AggregatorInstantiator.PROTECTED_RESULT_URL_ENV]?.trim() ?? '';
+        return resourceUrl.length > 0 ? resourceUrl : null;
+    }
+
+    private getProtectedResultScenarioId(): string {
+        return process.env[AggregatorInstantiator.PROTECTED_RESULT_SCENARIO_ID_ENV]?.trim()
+            || 'unknown-scenario';
+    }
+
+    private getProtectedResultContainerUrl(resourceUrl: string): string {
+        const parsed = new URL(resourceUrl);
+        const pathnameSegments = parsed.pathname.split('/').filter(Boolean);
+        pathnameSegments.pop();
+        parsed.pathname = `/${pathnameSegments.join('/')}/`;
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString();
+    }
+
+    private evaluateProtectedResultEligibility(normalizedWindowMetadata: { event_time_span_ms: number | null; source: string }): {
+        eligible: boolean;
+        reason: string;
+        eventTimeSpanMs: number | null;
+        rspWindowMetadataSpanMs: number | null;
+    } {
+        const metrics = this.auditContext?.benchmarkTiming?.serverTiming?.metrics;
+        const firstEventTimestampMs = metrics?.rsp_first_event_timestamp_ms;
+        const lastEventTimestampMs = metrics?.rsp_last_event_timestamp_ms;
+        const eventTimeSpanMs = typeof firstEventTimestampMs === 'number'
+            && typeof lastEventTimestampMs === 'number'
+            && lastEventTimestampMs >= firstEventTimestampMs
+            ? lastEventTimestampMs - firstEventTimestampMs
+            : null;
+        const rspWindowMetadataSpanMs = normalizedWindowMetadata.source === 'rsp_engine_epoch_ms'
+            ? normalizedWindowMetadata.event_time_span_ms
+            : null;
+        const requiredSpanMs = this.windowWidthMs;
+
+        if (typeof eventTimeSpanMs === 'number' && eventTimeSpanMs >= requiredSpanMs) {
+            return {
+                eligible: true,
+                reason: 'event_time_span_full_window',
+                eventTimeSpanMs,
+                rspWindowMetadataSpanMs,
+            };
+        }
+
+        if (typeof rspWindowMetadataSpanMs === 'number' && rspWindowMetadataSpanMs >= requiredSpanMs) {
+            return {
+                eligible: true,
+                reason: 'rsp_engine_window_metadata_full_window',
+                eventTimeSpanMs,
+                rspWindowMetadataSpanMs,
+            };
+        }
+
+        return {
+            eligible: false,
+            reason: 'partial_window_not_materialized',
+            eventTimeSpanMs,
+            rspWindowMetadataSpanMs,
+        };
+    }
+
+    private async ensureProtectedResultContainerReady(resourceUrl: string): Promise<void> {
+        if (this.protectedResultContainerInitialized) {
+            return;
+        }
+        const protectedContainerUrl = this.getProtectedResultContainerUrl(resourceUrl);
+        const authorization = await this.resolveAuthorizationHeaderForResource(protectedContainerUrl, 'PUT');
+        const headers: Record<string, string> = {
+            'Content-Type': 'text/turtle',
+            'Link': '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"',
+        };
+        if (authorization) {
+            headers.Authorization = authorization;
+        }
+        this.logAlertHttpRequestTrace(protectedContainerUrl, 'PUT', headers);
+        const response = await fetch(protectedContainerUrl, {
+            method: 'PUT',
+            headers,
+            body: '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n',
+        });
+        console.log(`[VALIDATION][PROTECTED_RESULT] container_setup_response_received status=${response.status} url=${protectedContainerUrl}`);
+        this.protectedResultContainerInitialized = response.ok || response.status === 409 || response.status === 412;
+    }
+
+    private buildProtectedResultBody(input: {
+        benchmarkRunId: string;
+        scenarioId: string;
+        sourceEventUri?: string;
+        rspQueryHash: string;
+        rspWindowStartIso: string;
+        rspWindowEndIso: string;
+        rspResultTimestampIso: string;
+        createdAtIso: string;
+        actualValue: number;
+    }): string {
+        const sourceEventObject = input.sourceEventUri && input.sourceEventUri.startsWith('http')
+            ? `<${input.sourceEventUri}>`
+            : `"${(input.sourceEventUri ?? 'unknown').replace(/"/g, '\\"')}"`;
+        return `@prefix bench: <${AggregatorInstantiator.PROTECTED_RESULT_NS}> .
+@prefix xsd: <${AggregatorInstantiator.XSD_PREFIX}> .
+
+<> a <${AggregatorInstantiator.PROTECTED_RESULT_TYPE}> ;
+   bench:benchmarkRunId "${input.benchmarkRunId}" ;
+   bench:scenarioId "${input.scenarioId}" ;
+   bench:sourceEventId ${sourceEventObject} ;
+   bench:rspQueryHash "${input.rspQueryHash}" ;
+   bench:rspWindowStart "${input.rspWindowStartIso}"^^xsd:dateTime ;
+   bench:rspWindowEnd "${input.rspWindowEndIso}"^^xsd:dateTime ;
+   bench:rspResultTimestamp "${input.rspResultTimestampIso}"^^xsd:dateTime ;
+   bench:derivedFrom "rsp-query-result" ;
+   bench:createdAt "${input.createdAtIso}"^^xsd:dateTime ;
+   bench:actualValue "${input.actualValue}"^^xsd:decimal .
+`;
+    }
+
+    private async maybeMaterializeProtectedRspResult(input: {
+        sourceEventUri?: string;
+        numericSpo2: number;
+        windowTimestampFrom: number;
+        windowTimestampTo: number;
+        normalizedWindowMetadata: { event_time_span_ms: number | null; source: string };
+    }): Promise<Record<string, any> | null> {
+        const resourceUrl = this.getProtectedResultUrl();
+        if (!resourceUrl) {
+            return null;
+        }
+        if (this.protectedResultWritten) {
+            return {
+                enabled: true,
+                resource_url: resourceUrl,
+                status: 'already_written_for_run',
+            };
+        }
+
+        const benchmarkRunId = this.auditContext?.benchmarkTiming?.serverTiming?.benchmark_run_id;
+        const eligibility = this.evaluateProtectedResultEligibility(input.normalizedWindowMetadata);
+        if (!benchmarkRunId || !eligibility.eligible) {
+            return {
+                enabled: true,
+                resource_url: resourceUrl,
+                status: 'skipped',
+                benchmark_run_id: benchmarkRunId ?? null,
+                eligibility_reason: eligibility.reason,
+                event_time_span_ms: eligibility.eventTimeSpanMs,
+                rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
+            };
+        }
+
+        maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'protected_result_source_emitted_at_ns', true);
+        const createdAtIso = new Date().toISOString();
+        const body = this.buildProtectedResultBody({
+            benchmarkRunId,
+            scenarioId: this.getProtectedResultScenarioId(),
+            sourceEventUri: input.sourceEventUri,
+            rspQueryHash: this.hash_string,
+            rspWindowStartIso: new Date(input.windowTimestampFrom).toISOString(),
+            rspWindowEndIso: new Date(input.windowTimestampTo).toISOString(),
+            rspResultTimestampIso: createdAtIso,
+            createdAtIso,
+            actualValue: input.numericSpo2,
+        });
+        addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_body_bytes', Buffer.byteLength(body, 'utf8'));
+        await this.ensureProtectedResultContainerReady(resourceUrl);
+        incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_attempts');
+        maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'protected_result_write_started_at_ns', true);
+
+        const authorization = await this.resolveAuthorizationHeaderForResource(resourceUrl, 'PUT');
+        const headers: Record<string, string> = {
+            'Content-Type': 'text/turtle',
+        };
+        if (authorization) {
+            headers.Authorization = authorization;
+        }
+
+        console.log(`[VALIDATION][PROTECTED_RESULT] write_request_sent url=${resourceUrl} benchmark_run_id=${benchmarkRunId} query_hash=${this.hash_string}`);
+        this.logAlertHttpRequestTrace(resourceUrl, 'PUT', headers);
+
+        try {
+            const response = await fetch(resourceUrl, {
+                method: 'PUT',
+                headers,
+                body,
+            });
+            const responseBody = await response.text().catch(() => '');
+            addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_status_code', response.status);
+            if (response.ok) {
+                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'protected_result_write_completed_at_ns', true);
+                this.protectedResultWritten = true;
+            }
+            console.log(`[VALIDATION][PROTECTED_RESULT] write_response_received status=${response.status} url=${resourceUrl} body=${JSON.stringify(responseBody)}`);
+            return {
+                enabled: true,
+                resource_url: resourceUrl,
+                status: response.ok ? 'written' : 'write_failed',
+                benchmark_run_id: benchmarkRunId,
+                scenario_id: this.getProtectedResultScenarioId(),
+                rsp_query_hash: this.hash_string,
+                eligibility_reason: eligibility.reason,
+                event_time_span_ms: eligibility.eventTimeSpanMs,
+                rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
+                write_status_code: response.status,
+                write_response_excerpt: responseBody.slice(0, 240),
+                created_at: createdAtIso,
+            };
+        } catch (error) {
+            const err = error as Error;
+            console.log(`[VALIDATION][PROTECTED_RESULT] write_error url=${resourceUrl} message=${JSON.stringify(err.message)} stack=${JSON.stringify(err.stack ?? '')}`);
+            return {
+                enabled: true,
+                resource_url: resourceUrl,
+                status: 'write_error',
+                benchmark_run_id: benchmarkRunId,
+                scenario_id: this.getProtectedResultScenarioId(),
+                rsp_query_hash: this.hash_string,
+                eligibility_reason: eligibility.reason,
+                event_time_span_ms: eligibility.eventTimeSpanMs,
+                rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
+                write_error: err.message,
+                created_at: createdAtIso,
+            };
+        }
+    }
+
     private resolveAlertWriteToken(): string | null {
         const rawToken = process.env[AggregatorInstantiator.ALICE_ALERT_WRITE_TOKEN_ENV]?.trim() ?? '';
         const hasToken = rawToken.length > 0;
@@ -752,6 +1004,62 @@ export class AggregatorInstantiator {
         return claimToken;
     }
 
+    private getOwnerWriteClaim(): { token: string; token_format: string } {
+        return {
+            token: process.env[AggregatorInstantiator.OWNER_WRITE_CLAIM_TOKEN_ENV]
+                || AggregatorInstantiator.DEFAULT_OWNER_WRITE_CLAIM_TOKEN,
+            token_format: process.env[AggregatorInstantiator.OWNER_WRITE_CLAIM_FORMAT_ENV]
+                || AggregatorInstantiator.WEBID_CLAIM_FORMAT,
+        };
+    }
+
+    private async resolveAuthorizationHeaderForResource(resourceUrl: string, method: string): Promise<string | null> {
+        const cacheKey = `${method.toUpperCase()}:${resourceUrl}`;
+        const cached = this.resourceAuthorizationHeaders.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        const claim = this.getOwnerWriteClaim();
+        try {
+            const challengeResponse = await fetch(resourceUrl, {
+                method,
+                headers: { 'Content-Type': 'text/turtle' },
+                body: '',
+            });
+            if (challengeResponse.status !== 401) {
+                console.log(`[VALIDATION][PROTECTED_RESULT][TOKEN] unexpected_challenge_status status=${challengeResponse.status} url=${resourceUrl} method=${method}`);
+                return null;
+            }
+            const { tokenEndpoint, ticket } = parseAuthenticateHeader(challengeResponse.headers as Headers);
+            const tokenResponse = await fetch(tokenEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: AggregatorInstantiator.UMA_TICKET_GRANT_TYPE,
+                    ticket,
+                    claim_token: this.formatClaimToken(claim.token, claim.token_format),
+                    claim_token_format: claim.token_format,
+                }),
+            });
+            const tokenBody = await tokenResponse.text().catch(() => '');
+            if (tokenResponse.status !== 200) {
+                console.log(`[VALIDATION][PROTECTED_RESULT][TOKEN] exchange_failed status=${tokenResponse.status} url=${resourceUrl} body=${JSON.stringify(tokenBody)}`);
+                return null;
+            }
+            const parsedToken = JSON.parse(tokenBody) as { access_token?: string; token_type?: string };
+            if (!parsedToken.access_token) {
+                return null;
+            }
+            const authorization = `${parsedToken.token_type || 'Bearer'} ${parsedToken.access_token}`;
+            this.resourceAuthorizationHeaders.set(cacheKey, authorization);
+            return authorization;
+        } catch (error) {
+            const err = error as Error;
+            console.log(`[VALIDATION][PROTECTED_RESULT][TOKEN] exchange_error url=${resourceUrl} message=${JSON.stringify(err.message)} stack=${JSON.stringify(err.stack ?? '')}`);
+            return null;
+        }
+    }
+
     private async resolveAlertWriteAuthorizationHeader(): Promise<string | null> {
         const configuredToken = this.resolveAlertWriteToken();
         if (configuredToken) {
@@ -760,7 +1068,7 @@ export class AggregatorInstantiator {
         if (this.fallbackAlertWriteAuthorizationHeader) {
             return this.fallbackAlertWriteAuthorizationHeader;
         }
-        const claim = getUmaClaim();
+        const claim = this.getOwnerWriteClaim();
         try {
             const challengeResponse = await fetch(AggregatorInstantiator.ALERT_CONTAINER, {
                 method: 'POST',

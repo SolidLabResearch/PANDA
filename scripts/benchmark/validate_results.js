@@ -38,6 +38,9 @@ function validate(row) {
   const m = row.metrics || {};
   const definitions = row.metric_definitions || {};
   const failures = [];
+  const isProtectedScenario = row?.scenario_id === 'uma-replayer-panda-derived-anomaly-e2e'
+    || row?.benchmark_mode === 'protected_rsp_result'
+    || row?.protected_result_flow?.enabled === true;
 
   const requireCheck = (condition, reason) => {
     if (!condition) failures.push(reason);
@@ -121,6 +124,36 @@ function validate(row) {
   for (const [metric, definition] of Object.entries(definitions)) {
     if (definition.type === 'unavailable') {
       requireCheck(m[metric] === null || m[metric] === undefined, `${metric} is unavailable but raw metric value is ${m[metric]}`);
+    }
+  }
+
+  if (isProtectedScenario) {
+    const protectedFlow = row.protected_result_flow || {};
+    const body = protectedFlow.returned_body_parsed || {};
+    requireCheck(protectedFlow.websocket_protected_result?.status === 'written', 'protected result was not written successfully by PANDA');
+    requireCheck(typeof protectedFlow.protected_result_url === 'string' && protectedFlow.protected_result_url.length > 0, 'protected_result_url must be recorded');
+    requireCheck(protectedFlow.public_preflight_status !== 200, 'anonymous/public read returned 200 for protected resource');
+    requireCheck(protectedFlow.notification_subscription_status === 'subscribed', 'notification subscription did not succeed');
+    requireCheck(protectedFlow.notification_received?.matchesExpected === true, 'relevant Solid notification was not observed');
+    requireCheck(protectedFlow.odrl_proof?.passed === true, 'live ODRL proof for nurse protected read is missing');
+    requireCheck(protectedFlow.nurse_get_status === 200, 'nurse/caregiver authorized GET did not return 200');
+    requireCheck(body.benchmarkRunId === row.benchmark_run_id, 'returned protected result body benchmarkRunId does not match current run');
+    requireCheck(body.derivedFrom === 'rsp-query-result', 'returned protected result body derivedFrom is not rsp-query-result');
+    requireCheck(body.rspQueryHash === row.message_query_hash, 'returned protected result body rspQueryHash does not match accepted RSP output');
+    requireCheck(protectedFlow.stale_content_detected !== true, 'stale protected result content satisfied the benchmark');
+    requireCheck(isFiniteNumber(m.nurse_result_total_read_ms) && m.nurse_result_total_read_ms > 0, 'nurse_result_total_read_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.end_to_end_replayer_to_nurse_result_read_ms) && m.end_to_end_replayer_to_nurse_result_read_ms > 0, 'end_to_end_replayer_to_nurse_result_read_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.query_registration_to_nurse_result_read_ms) && m.query_registration_to_nurse_result_read_ms > 0, 'query_registration_to_nurse_result_read_ms must exist and be > 0');
+    requireCheck(
+      !isFiniteNumber(m.panda_result_write_to_notification_ms) || m.panda_result_write_to_notification_ms >= 0,
+      'panda_result_write_to_notification_ms must not be negative',
+    );
+    const writeAt = Date.parse(row.sequence?.panda_protected_result_written || '');
+    const notificationAt = Date.parse(row.sequence?.nurse_notification_received || '');
+    if (Number.isFinite(writeAt) && Number.isFinite(notificationAt)) {
+      requireCheck(notificationAt >= writeAt, 'notification was observed before PANDA write completed');
+    } else {
+      requireCheck(false, 'protected sequence timestamps are missing for write or notification');
     }
   }
 

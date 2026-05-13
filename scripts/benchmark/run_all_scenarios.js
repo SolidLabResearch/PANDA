@@ -12,6 +12,17 @@ const {
   resolveRepoPath,
   ensureRepoExists,
 } = require('./workspace_paths');
+const {
+  parseAuthenticateHeader: parseProtectedAuthenticateHeader,
+  extractNotificationChannel,
+  subscribeToWebhookChannel,
+  startWebhookObserver,
+  fetchUmaChallenge,
+  exchangeToken: exchangeProtectedToken,
+  authorizedGet,
+  parseProtectedResultTurtle,
+  checkOdrlLogProof,
+} = require('./protected_result_helpers');
 
 const ROOT = repoRoot;
 const SCENARIO_DIR = path.join(ROOT, 'benchmarks', 'scenarios');
@@ -316,6 +327,29 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function safeReadText(file) {
+  if (!file) return '';
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
+function renderUrlTemplate(template, benchmarkRunId) {
+  return String(template || '').replace(/\{benchmark_run_id\}/g, benchmarkRunId);
+}
+
+function getProtectedResultConfig(scenario, benchmarkRunId) {
+  if (scenario?.benchmark_mode !== 'protected_rsp_result' || !scenario?.protected_result) {
+    return null;
+  }
+  return {
+    ...scenario.protected_result,
+    resource_url: renderUrlTemplate(scenario.protected_result.resource_url_template, benchmarkRunId),
+  };
+}
+
 function commandForDisplay(command, args) {
   return [command, ...args.map((arg) => /\s/.test(arg) ? JSON.stringify(arg) : arg)].join(' ');
 }
@@ -430,8 +464,9 @@ async function startUma(opts, runRoot, runId) {
   };
 }
 
-async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses) {
+async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses, benchmarkRunId) {
   const startedContainersAt = performance.now();
+  const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
   const dirs = [
     '',
     'alice',
@@ -439,6 +474,9 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     'alice/derived',
     'alice/derived/anomaly-alert',
   ];
+  if (protectedResult) {
+    dirs.push('alice/protected-rsp-results');
+  }
   for (const dir of dirs) {
     ensureDir(path.join(cssStatePath, dir));
   }
@@ -447,7 +485,10 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     'http://localhost:3000/alice/derived/',
     'http://localhost:3000/alice/derived/anomaly-alert/',
   ];
-  const policy = makeOdrlPolicy(scenario);
+  if (protectedResult) {
+    containerUrls.push(protectedResult.container_url);
+  }
+  const policy = makeOdrlPolicy(scenario, benchmarkRunId);
   const policyResponse = await fetch('http://localhost:4000/uma/policies', {
     method: 'POST',
     headers: {
@@ -494,6 +535,9 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     ['alice/derived/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
     ['alice/derived/anomaly-alert/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
   ]);
+  if (protectedResult) {
+    metaFiles.set('alice/protected-rsp-results/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n');
+  }
   for (const [relativePath, content] of metaFiles) {
     fs.writeFileSync(path.join(cssStatePath, relativePath), content);
     const url = `http://localhost:3000/${relativePath}`;
@@ -504,10 +548,26 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses)
     });
     httpStatuses.push({ phase: 'meta_put', status: response.status, url });
   }
+  let protectedResultBootstrap = null;
+  if (protectedResult) {
+    const placeholderBody = `@prefix bench: <http://example.org/panda-benchmark#> .\n<> bench:status "placeholder" .\n`;
+    const response = await fetchWithUma(protectedResult.resource_url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/turtle' },
+      body: placeholderBody,
+    });
+    httpStatuses.push({ phase: 'protected_result_placeholder_put', status: response.status, url: protectedResult.resource_url });
+    protectedResultBootstrap = {
+      container_url: protectedResult.container_url,
+      resource_url: protectedResult.resource_url,
+      placeholder_status: response.status,
+    };
+  }
   return {
     containerCreationMs,
     metaPolicyWriteMs: performance.now() - startedMetaAt,
     metaPaths: Array.from(metaFiles.keys()),
+    protectedResultBootstrap,
   };
 }
 
@@ -558,18 +618,23 @@ async function exchangeToken(tokenEndpoint, ticket) {
   return JSON.parse(body);
 }
 
-function makeOdrlPolicy(scenario) {
+function makeOdrlPolicy(scenario, benchmarkRunId) {
   const stream = scenario.target_css_resources.stream_container_url;
   const latest = scenario.target_css_resources.derived_latest_url;
   const alert = scenario.target_css_resources.alert_container_url;
   const derived = 'http://localhost:3000/alice/derived/';
+  const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
   const metaTargets = [
     'http://localhost:3000/alice/.meta',
     'http://localhost:3000/alice/spo2/.meta',
     'http://localhost:3000/alice/derived/.meta',
     'http://localhost:3000/alice/derived/anomaly-alert/.meta',
   ];
+  if (protectedResult) {
+    metaTargets.push('http://localhost:3000/alice/protected-rsp-results/.meta');
+  }
   const owner = 'http://localhost:3000/alice/profile/card#me';
+  const nurse = protectedResult?.nurse_webid || 'http://localhost:3000/bob/profile/card#me';
   const metaPermissions = metaTargets.map((target, index) => `
 ex:writeMeta${index} a odrl:Permission ;
   odrl:target <${target}> ;
@@ -583,7 +648,7 @@ ex:writeMeta${index} a odrl:Permission ;
 
 ex:policy a odrl:Agreement ;
   odrl:uid ex:policy ;
-  odrl:permission ex:readLatest, ex:readStream, ex:writeStream, ex:writeDerived, ex:writeAlert${metaTargets.map((_, index) => `, ex:writeMeta${index}`).join('')} .
+  odrl:permission ex:readLatest, ex:readStream, ex:writeStream, ex:writeDerived, ex:writeAlert${protectedResult ? ', ex:writeProtectedResultContainer, ex:writeProtectedResultResource, ex:readProtectedResultResource' : ''}${metaTargets.map((_, index) => `, ex:writeMeta${index}`).join('')} .
 
 ex:readLatest a odrl:Permission ;
   odrl:target <${latest}> ;
@@ -615,18 +680,42 @@ ex:writeAlert a odrl:Permission ;
   odrl:assignee <${owner}> ;
   odrl:action odrl:create, odrl:append, odrl:write, odrl:read .
 ${metaPermissions}
+${protectedResult ? `
+ex:writeProtectedResultContainer a odrl:Permission ;
+  odrl:target <${protectedResult.container_url}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${owner}> ;
+  odrl:action odrl:create, odrl:append, odrl:write, odrl:read .
+
+ex:writeProtectedResultResource a odrl:Permission ;
+  odrl:target <${protectedResult.resource_url}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${owner}> ;
+  odrl:action odrl:create, odrl:append, odrl:write, odrl:read .
+
+ex:readProtectedResultResource a odrl:Permission ;
+  odrl:target <${protectedResult.resource_url}> ;
+  odrl:assigner <${owner}> ;
+  odrl:assignee <${nurse}> ;
+  odrl:action odrl:read .
+` : ''}
 `.trim();
 }
 
-async function startPanda(runRoot, runId) {
+async function startPanda(runRoot, runId, scenario, benchmarkRunId) {
   const logFile = path.join(runRoot, 'raw', `panda-run-${runId}.log`);
   const startedAt = performance.now();
+  const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
   const child = spawnLogged('npm', ['run', 'start-monitoring'], {
     cwd: ROOT,
     env: {
       ...process.env,
       BENCHMARK_TIMING: '1',
       PANDA_EXPECTED_PROPERTY_IRI: 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      ...(protectedResult ? {
+        PANDA_BENCHMARK_PROTECTED_RESULT_URL: protectedResult.resource_url,
+        PANDA_BENCHMARK_SCENARIO_ID: scenario.scenario_id,
+      } : {}),
     },
   }, logFile);
   await waitForHttp('http://localhost:8080/', 120000);
@@ -678,6 +767,56 @@ async function waitForReplayerActive(counters, timeoutMs) {
     await sleep(250);
   }
   throw new Error('Timed out waiting for replayer to actively post stream data');
+}
+
+async function setupProtectedResultSubscription(protectedResultConfig) {
+  const observer = await startWebhookObserver(protectedResultConfig.resource_url);
+  const discovery = await extractNotificationChannel(protectedResultConfig.resource_url);
+  const subscription = await subscribeToWebhookChannel(
+    discovery.channelUrl,
+    protectedResultConfig.resource_url,
+    observer.sendTo,
+    protectedResultConfig.owner_webid,
+  );
+  return {
+    observer,
+    discovery,
+    subscription,
+  };
+}
+
+async function performProtectedResultUmaRead(protectedResultConfig, umaLogFile) {
+  const odrlLogBefore = safeReadText(umaLogFile);
+  const challenge = await fetchUmaChallenge(protectedResultConfig.resource_url);
+  const challengeParsed = challenge.status === 401
+    ? parseProtectedAuthenticateHeader(challenge.header)
+    : null;
+  const token = challengeParsed
+    ? await exchangeProtectedToken(challengeParsed.tokenEndpoint, challengeParsed.ticket, protectedResultConfig.nurse_webid)
+    : null;
+  const authorized = token?.json?.access_token
+    ? await authorizedGet(
+      protectedResultConfig.resource_url,
+      token.json.token_type || 'Bearer',
+      token.json.access_token,
+    )
+    : null;
+  const odrlLogAfter = safeReadText(umaLogFile);
+  const odrlProof = checkOdrlLogProof(
+    odrlLogAfter.slice(odrlLogBefore.length),
+    protectedResultConfig.resource_url,
+    protectedResultConfig.nurse_webid,
+  );
+  const parsedBody = authorized?.status === 200
+    ? parseProtectedResultTurtle(authorized.body)
+    : null;
+  return {
+    challenge,
+    token,
+    authorized,
+    odrlProof,
+    parsedBody,
+  };
 }
 
 function registerQueryAndWait(scenario, opts, benchmarkRunId) {
@@ -1359,6 +1498,114 @@ function metricDefinitions() {
       notes: 'Measured inside PANDA authorization prefetch during query registration when UMA flow is needed.',
     },
     odrl_policy_eval_ms: unavailable('odrl_policy_eval_ms', 'ODRL policy evaluation CPU time is not currently emitted by the UMA service for this benchmark.'),
+    nurse_notification_subscribe_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_notification_subscribe_start',
+      end_event: 'nurse_notification_subscribed',
+      interpretation: 'Benchmark-runner time to discover the notification channel, create the webhook subscription, and confirm registration before the protected result is expected.',
+      critical_path: false,
+      notes: 'Setup before the protected critical path begins.',
+    },
+    rsp_output_to_panda_result_write_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_first_any_result_emit_ms',
+      end_event: 'panda_protected_result_written',
+      interpretation: 'Time from the accepted full-window RSP output becoming eligible for materialization until PANDA completed the protected Solid write.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    panda_result_write_total_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'protected_result_write_start',
+      end_event: 'panda_protected_result_written',
+      interpretation: 'Time spent on the protected result resource write itself.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    panda_result_write_to_notification_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'panda_protected_result_written',
+      end_event: 'nurse_notification_received',
+      interpretation: 'Notification delivery latency after PANDA completed the protected Solid write.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    nurse_notification_to_uma_get_start_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_notification_received',
+      end_event: 'nurse_result_uma_get_start',
+      interpretation: 'Runner-side delay between observing the notification and starting the nurse UMA GET flow.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    nurse_result_uma_challenge_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_result_uma_get_start',
+      end_event: 'nurse_result_uma_challenge_complete',
+      interpretation: 'Tokenless nurse GET latency until the UMA challenge was received.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    nurse_result_token_exchange_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_result_token_exchange_start',
+      end_event: 'nurse_result_token_exchange_complete',
+      interpretation: 'UMA ticket exchange latency for the nurse/caregiver protected result read.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    nurse_result_authorized_get_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_result_authorized_get_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Latency of the authorized nurse GET that returned the protected result body.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    nurse_result_total_read_ms: {
+      unit: 'ms',
+      type: 'derived',
+      start_event: 'nurse_result_uma_get_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'End-to-end nurse read latency including challenge, ticket exchange, and authorized GET.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    end_to_end_replayer_to_rsp_output_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'replayer_start',
+      end_event: 'client_first_valid_result_received',
+      interpretation: 'Time from the replayer start until the accepted full-window RSP result was observed over WebSocket.',
+      critical_path: true,
+      notes: 'This preserves the baseline live-window leg inside the protected scenario.',
+    },
+    end_to_end_replayer_to_nurse_result_read_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'replayer_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Full protected critical path: replayer start to nurse/caregiver authorized GET completion.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    query_registration_to_nurse_result_read_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'query_register_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Time from query registration send until the nurse/caregiver authorized GET completed.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
     last_ignored_event_count: {
       unit: 'count',
       type: 'counter',
@@ -1429,6 +1676,8 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
   const serverEvents = [
     ['rsp_first_event_after_query_register_added', parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns), 'First server-side stream event added to the RSP engine after query registration.'],
     ['rsp_first_any_result_emit_ms', parseNs(timing.first_result_emitted_at_ns), 'First server-side RSP result emission after query registration; may be a partial-window result.'],
+    ['protected_result_write_start', parseNs(timing.protected_result_write_started_at_ns), 'PANDA started writing the protected Solid result resource.'],
+    ['panda_protected_result_written', parseNs(timing.protected_result_write_completed_at_ns), 'PANDA finished writing the protected Solid result resource for the accepted full-window result.'],
     ['server_first_valid_result_sent', parseNs(timing.server_sent_at_ns), 'PANDA WebSocket relay sent the accepted result to the benchmark client.'],
   ];
   for (const [event, ns, notes] of serverEvents) {
@@ -1439,6 +1688,10 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
   if (queryResult.firstResultAt && queryResult.firstResultWall) {
     add('client_first_valid_result_received', queryResult.firstResultAt - queryResult.querySendAt, queryResult.firstResultWall, 'Benchmark client accepted the first result whose event-time span or explicit RSP window metadata proves a complete configured window.');
   }
+  addLocal('nurse_notification_subscribed', 'Benchmark runner registered a Solid notification webhook before the protected result was expected.');
+  addLocal('nurse_notification_received', 'Benchmark runner observed the Solid notification for the protected result resource.');
+  addLocal('nurse_result_uma_get_start', 'Nurse/caregiver started the UMA-protected GET after notification.');
+  addLocal('nurse_result_uma_get_complete', 'Nurse/caregiver completed the authorized GET of the protected result resource.');
   addLocal('replayer_completed', 'Live stream replayer completed after the query result was received.');
   return timeline.sort((a, b) => a.t_relative_ms - b.t_relative_ms);
 }
@@ -1450,6 +1703,23 @@ function validateOutput(raw, scenario, replayerCounters) {
   const missingLogMarkers = requiredMarkers.filter((marker) => !raw.log_markers_found.includes(marker));
   const acceptedFullWindow = raw.accepted_result_validation_reason === 'event_time_span_full_window'
     || raw.accepted_result_validation_reason === 'rsp_engine_window_metadata_full_window';
+  const isProtectedScenario = scenario?.benchmark_mode === 'protected_rsp_result';
+  const protectedFlow = raw.protected_result_flow || {};
+  const protectedBody = protectedFlow.returned_body_parsed || {};
+  const protectedFlowPassed = !isProtectedScenario || Boolean(
+    raw.sequence.nurse_notification_subscribed
+    && raw.sequence.nurse_notification_received
+    && raw.sequence.nurse_result_read_completed
+    && protectedFlow.public_preflight_status !== 200
+    && protectedFlow.notification_subscription_status === 'subscribed'
+    && protectedFlow.notification_received?.matchesExpected === true
+    && protectedFlow.nurse_get_status === 200
+    && protectedBody.benchmarkRunId === raw.benchmark_run_id
+    && protectedBody.derivedFrom === 'rsp-query-result'
+    && protectedBody.rspQueryHash === queryResultHash(raw)
+    && protectedFlow.odrl_proof?.passed === true
+    && protectedFlow.stale_content_detected !== true
+  );
   const passed = Boolean(
     raw.status === 'complete'
     && raw.sequence.css_uma_started
@@ -1469,18 +1739,35 @@ function validateOutput(raw, scenario, replayerCounters) {
     && m.replayer_events_posted_after_query_registration > 0
     && missingLogMarkers.length === 0
     && raw.query_registration_delay_seconds + raw.query_window_seconds < raw.replayer_duration_seconds
+    && protectedFlowPassed
   );
   if (!passed) {
     details.reason = 'One or more live benchmark validity checks failed.';
     if (missingLogMarkers.length > 0) details.missing_log_markers = missingLogMarkers;
     if (!acceptedFullWindow) details.accepted_result_validation_reason = raw.accepted_result_validation_reason || null;
+    if (isProtectedScenario && !protectedFlowPassed) {
+      details.protected_result_flow = {
+        public_preflight_status: protectedFlow.public_preflight_status ?? null,
+        notification_subscription_status: protectedFlow.notification_subscription_status ?? null,
+        notification_received: protectedFlow.notification_received ?? null,
+        nurse_get_status: protectedFlow.nurse_get_status ?? null,
+        returned_body_parsed: protectedBody,
+        odrl_proof: protectedFlow.odrl_proof ?? null,
+        stale_content_detected: protectedFlow.stale_content_detected ?? null,
+      };
+    }
   }
   return { passed, details };
+}
+
+function queryResultHash(raw) {
+  return raw?.message_query_hash || raw?.protected_result_flow?.websocket_protected_result?.rsp_query_hash || raw?.protected_result_flow?.websocket_protected_result?.rspQueryHash || null;
 }
 
 async function runOneScenario(scenario, opts, runRoot, runId, phase) {
   const isWarmup = phase === 'warmup';
   const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
+  const protectedResultConfig = getProtectedResultConfig(scenario, benchmarkRunId);
   const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
   const failureDir = isWarmup ? path.join(runRoot, 'failures', 'warmup') : path.join(runRoot, 'failures');
   ensureDir(rawDir);
@@ -1496,6 +1783,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     git_commit: safeGitCommit(),
     node_version: process.version,
     scenario_id: scenario.scenario_id,
+    benchmark_mode: scenario.benchmark_mode || 'baseline_websocket_result',
     scenario_file_path: scenario.__scenario_file || null,
     run_id: runId,
     phase,
@@ -1520,10 +1808,12 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     http_statuses: httpStatuses,
     log_markers_found: [],
     output_check: { passed: false, details: {} },
+    protected_result_flow: null,
   };
   let panda;
   let umaProcess;
   let replayer;
+  let protectedObserver;
   const events = {};
   const markEvent = (event, notes = '') => {
     events[event] = { t: performance.now(), timestamp: isoNow(), notes };
@@ -1544,16 +1834,38 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     markEvent('css_uma_ready');
     sequence.css_uma_started = isoNow();
     raw.metrics.css_uma_startup_ms = uma.ms;
-    const setup = await createContainersAndPolicies(scenario, uma.cssStatePath, httpStatuses);
+    const setup = await createContainersAndPolicies(scenario, uma.cssStatePath, httpStatuses, benchmarkRunId);
     markEvent('containers_created');
     sequence.containers_created = isoNow();
     markEvent('meta_policies_written');
     sequence.meta_policies_written = isoNow();
     raw.metrics.container_creation_ms = setup.containerCreationMs;
     raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
+    if (protectedResultConfig) {
+      raw.protected_result_flow = {
+        enabled: true,
+        protected_result_url: protectedResultConfig.resource_url,
+        protected_result_container_url: protectedResultConfig.container_url,
+        bootstrap: setup.protectedResultBootstrap,
+        notification_subscription_status: 'not_started',
+      };
+      const publicPreflight = await fetchUmaChallenge(protectedResultConfig.resource_url);
+      raw.protected_result_flow.public_preflight_status = publicPreflight.status;
+      raw.protected_result_flow.public_preflight_header = publicPreflight.header;
+      markEvent('nurse_notification_subscribe_start');
+      const subscriptionStartedAt = performance.now();
+      const subscriptionSetup = await setupProtectedResultSubscription(protectedResultConfig);
+      protectedObserver = subscriptionSetup.observer;
+      raw.protected_result_flow.notification_channel = subscriptionSetup.discovery;
+      raw.protected_result_flow.notification_subscription = subscriptionSetup.subscription;
+      raw.protected_result_flow.notification_subscription_status = subscriptionSetup.subscription.ok ? 'subscribed' : 'subscription_failed';
+      raw.metrics.nurse_notification_subscribe_ms = performance.now() - subscriptionStartedAt;
+      markEvent('nurse_notification_subscribed');
+      sequence.nurse_notification_subscribed = isoNow();
+    }
 
     markEvent('panda_start_start');
-    const pandaPromise = startPanda(runRoot, runId);
+    const pandaPromise = startPanda(runRoot, runId, scenario, benchmarkRunId);
     await sleep(15000);
     panda = await pandaPromise;
     markEvent('panda_ready');
@@ -1613,6 +1925,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     sequence.client_result_received = isoNow();
 
     const timing = queryResult.message?.benchmark_timing || {};
+    const protectedResultPayload = queryResult.message?.protected_result || null;
     const serverRegistered = parseNs(timing.query_registered_at_ns);
     const serverFirstAdd = parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns);
     const serverSent = parseNs(timing.server_sent_at_ns);
@@ -1662,11 +1975,24 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       uma_token_exchange_ms: timing.uma?.uma_token_exchange_ms ?? null,
       authorized_retry_ms: timing.uma?.uma_protected_get_ms ?? null,
       odrl_policy_eval_ms: null,
+      nurse_notification_subscribe_ms: raw.metrics.nurse_notification_subscribe_ms ?? null,
+      rsp_output_to_panda_result_write_ms: null,
+      panda_result_write_total_ms: null,
+      panda_result_write_to_notification_ms: null,
+      nurse_notification_to_uma_get_start_ms: null,
+      nurse_result_uma_challenge_ms: null,
+      nurse_result_token_exchange_ms: null,
+      nurse_result_authorized_get_ms: null,
+      nurse_result_total_read_ms: null,
+      end_to_end_replayer_to_rsp_output_ms: queryResult.firstResultAt - replayerStartedAt,
+      end_to_end_replayer_to_nurse_result_read_ms: null,
+      query_registration_to_nurse_result_read_ms: null,
     };
     if (serverFirstResult && serverSent) {
       raw.metrics.rsp_first_any_result_emit_processing_ms = raw.metrics.rsp_first_any_result_emit_processing_ms ?? nsDiffMs(serverFirstResult, serverSent);
     }
     raw.client_result_delivery = queryResult.clientResultDelivery;
+    raw.message_query_hash = queryResult.message?.query_hash || null;
     raw.early_result_ignored_reasons_summary = queryResult.earlyResultIgnoredReasonsSummary;
     raw.early_result_ignored_samples = opts.mode === 'smoke' ? queryResult.earlyResultIgnoredSamples : undefined;
     Object.assign(raw, acceptedResultDebugFields(queryResult.acceptedResultEvidence));
@@ -1676,6 +2002,59 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     raw.run_isolation = buildRunIsolationEvidence(raw.metrics);
     raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);
     attachMetricDefinitions(raw);
+    if (protectedResultConfig) {
+      raw.protected_result_flow = {
+        ...raw.protected_result_flow,
+        websocket_protected_result: protectedResultPayload,
+      };
+      const writeStartedNs = parseNs(timing.protected_result_write_started_at_ns);
+      const writeCompletedNs = parseNs(timing.protected_result_write_completed_at_ns);
+      const protectedSourceNs = parseNs(timing.protected_result_source_emitted_at_ns);
+      raw.metrics.rsp_output_to_panda_result_write_ms = nsDiffMs(protectedSourceNs, writeCompletedNs);
+      raw.metrics.panda_result_write_total_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+      if (writeCompletedNs) {
+        const writeCompletedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeCompletedNs);
+        if (Number.isFinite(writeCompletedRelMs)) {
+          markEvent('panda_protected_result_written');
+          sequence.panda_protected_result_written = addMsToIso(queryResult.querySendWall, writeCompletedRelMs);
+        }
+      }
+
+      const notification = await protectedObserver.waitForNotification(Math.max(120000, (opts.queryWindow + 60) * 1000));
+      markEvent('nurse_notification_received');
+      sequence.nurse_notification_received = notification.received_at;
+      raw.protected_result_flow.notification_received = notification;
+      const notificationTimeMs = Date.parse(notification.received_at);
+      const writeCompletedAtIso = protectedResultPayload?.created_at || sequence.panda_protected_result_written || null;
+      const writeCompletedAtMs = writeCompletedAtIso ? Date.parse(writeCompletedAtIso) : NaN;
+      raw.metrics.panda_result_write_to_notification_ms = Number.isFinite(writeCompletedAtMs)
+        ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
+        : null;
+
+      markEvent('nurse_result_uma_get_start');
+      raw.metrics.nurse_notification_to_uma_get_start_ms = events.nurse_result_uma_get_start.t - events.nurse_notification_received.t;
+      const protectedRead = await performProtectedResultUmaRead(protectedResultConfig, uma.umaLogFile);
+      markEvent('nurse_result_uma_get_complete');
+      sequence.nurse_result_read_completed = isoNow();
+      raw.protected_result_flow.nurse_read = protectedRead;
+      raw.metrics.nurse_result_uma_challenge_ms = protectedRead.challenge?.durationMs ?? null;
+      raw.metrics.nurse_result_token_exchange_ms = protectedRead.token?.durationMs ?? null;
+      raw.metrics.nurse_result_authorized_get_ms = protectedRead.authorized?.durationMs ?? null;
+      raw.metrics.nurse_result_total_read_ms = (protectedRead.challenge?.durationMs ?? 0)
+        + (protectedRead.token?.durationMs ?? 0)
+        + (protectedRead.authorized?.durationMs ?? 0);
+      raw.metrics.query_registration_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - queryResult.querySendAt;
+      raw.metrics.end_to_end_replayer_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - replayer.startedAtPerf;
+      raw.protected_result_flow.returned_body_excerpt = protectedRead.authorized?.body?.slice(0, 320) ?? '';
+      raw.protected_result_flow.returned_body_parsed = protectedRead.parsedBody;
+      raw.protected_result_flow.odrl_proof = protectedRead.odrlProof;
+      raw.protected_result_flow.nurse_get_status = protectedRead.authorized?.status ?? null;
+      raw.protected_result_flow.stale_content_detected = Boolean(
+        protectedRead.parsedBody
+        && protectedRead.parsedBody.benchmarkRunId
+        && protectedRead.parsedBody.benchmarkRunId !== benchmarkRunId
+      );
+    }
     const replayerExitInfo = await replayer.exitInfoPromise;
     stopReplayerWatcher();
     markEvent('replayer_completed');
@@ -1728,6 +2107,13 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     stopChild(replayer?.child);
     stopChild(panda?.child);
     stopChild(umaProcess);
+    if (protectedObserver) {
+      try {
+        await protectedObserver.close();
+      } catch (_) {
+        // ignore observer shutdown failures
+      }
+    }
     if (opts.force) {
       killPortsIfForced(true, [3000, 4000, 8080]);
     }
