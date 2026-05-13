@@ -144,31 +144,47 @@ function validate(row) {
     requireCheck(isFiniteNumber(m.nurse_result_total_read_ms) && m.nurse_result_total_read_ms > 0, 'nurse_result_total_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.end_to_end_replayer_to_nurse_result_read_ms) && m.end_to_end_replayer_to_nurse_result_read_ms > 0, 'end_to_end_replayer_to_nurse_result_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.query_registration_to_nurse_result_read_ms) && m.query_registration_to_nurse_result_read_ms > 0, 'query_registration_to_nurse_result_read_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.rsp_emit_to_protected_write_start_ms) && m.rsp_emit_to_protected_write_start_ms >= 0, 'rsp_emit_to_protected_write_start_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.protected_write_start_to_complete_ms) && m.protected_write_start_to_complete_ms >= 0, 'protected_write_start_to_complete_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.protected_write_complete_to_notification_ms) && m.protected_write_complete_to_notification_ms >= 0, 'protected_write_complete_to_notification_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.notification_to_nurse_read_complete_ms) && m.notification_to_nurse_read_complete_ms >= 0, 'notification_to_nurse_read_complete_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.rsp_emit_to_nurse_read_complete_ms) && m.rsp_emit_to_nurse_read_complete_ms > 0, 'rsp_emit_to_nurse_read_complete_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.query_register_to_nurse_read_complete_ms) && m.query_register_to_nurse_read_complete_ms > 0, 'query_register_to_nurse_read_complete_ms must exist and be > 0');
+    requireCheck(isFiniteNumber(m.replayer_start_to_nurse_read_complete_ms) && m.replayer_start_to_nurse_read_complete_ms > 0, 'replayer_start_to_nurse_read_complete_ms must exist and be > 0');
     requireCheck(
       !isFiniteNumber(m.panda_result_write_to_notification_ms) || m.panda_result_write_to_notification_ms >= 0,
       'panda_result_write_to_notification_ms must not be negative',
     );
-    const writeAt = Date.parse(row.sequence?.panda_protected_result_written || '');
-    const notificationAt = Date.parse(row.sequence?.nurse_notification_received || '');
-    if (Number.isFinite(writeAt) && Number.isFinite(notificationAt)) {
-      requireCheck(notificationAt >= writeAt, 'notification was observed before PANDA write completed');
-    } else {
-      requireCheck(false, 'protected sequence timestamps are missing for write or notification');
+    const writeStart = timelineEvent(row, 'protected_result_write_start');
+    const writeComplete = timelineEvent(row, 'panda_protected_result_written');
+    const notification = timelineEvent(row, 'nurse_notification_received');
+    const nurseReadComplete = timelineEvent(row, 'nurse_result_uma_get_complete');
+    requireCheck(Boolean(writeStart), 'critical_path_timeline must include protected_result_write_start');
+    requireCheck(Boolean(writeComplete), 'critical_path_timeline must include panda_protected_result_written');
+    requireCheck(Boolean(notification), 'critical_path_timeline must include nurse_notification_received');
+    requireCheck(Boolean(nurseReadComplete), 'critical_path_timeline must include nurse_result_uma_get_complete');
+    if (writeStart && writeComplete) {
+      requireCheck(writeStart.t_relative_ms <= writeComplete.t_relative_ms, 'protected_write_start must be <= protected_write_complete');
+    }
+    if (writeComplete && notification) {
+      requireCheck(writeComplete.t_relative_ms <= notification.t_relative_ms, 'protected_write_complete must be <= nurse_notification_received');
+    }
+    if (notification && nurseReadComplete) {
+      requireCheck(notification.t_relative_ms <= nurseReadComplete.t_relative_ms, 'nurse_notification_received must be <= nurse_result_uma_get_complete');
+    }
+    if (row.mode === 'smoke' && isFiniteNumber(m.rsp_emit_to_nurse_read_complete_ms)) {
+      requireCheck(
+        m.rsp_emit_to_nurse_read_complete_ms > 0 && m.rsp_emit_to_nurse_read_complete_ms < 20000,
+        'rsp_emit_to_nurse_read_complete_ms is outside the sane smoke-run range (0, 20000)',
+      );
     }
   }
 
   return failures;
 }
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const runRoot = path.join(ROOT, 'benchmarks', 'results', 'runs', opts.benchmarkId);
-  const rawDir = path.join(runRoot, 'raw');
-  const allFiles = fs.readdirSync(rawDir)
-    .filter((file) => file.endsWith('.json'))
-    .map((file) => ({ file, row: JSON.parse(fs.readFileSync(path.join(rawDir, file), 'utf8')) }));
-  // Ignore warmup artifacts and legacy negative run ids when validating measured-run completeness.
-  const measured = allFiles.filter(({ file, row }) => (
+function buildValidationOutput(rows, opts) {
+  const measured = rows.filter(({ row }) => (
     row.phase === 'measured' || (typeof row.run_id === 'number' && row.run_id > 0)
   ));
   const failures = measured
@@ -231,8 +247,29 @@ function main() {
       resource_sample_validation_mode: opts.requireResourceSamples ? 'required_fatal' : 'warn_non_fatal',
     },
   };
+  return output;
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const runRoot = path.join(ROOT, 'benchmarks', 'results', 'runs', opts.benchmarkId);
+  const rawDir = path.join(runRoot, 'raw');
+  const rows = fs.readdirSync(rawDir)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => ({ file, row: JSON.parse(fs.readFileSync(path.join(rawDir, file), 'utf8')) }));
+  const output = buildValidationOutput(rows, opts);
   console.log(JSON.stringify(output, null, 2));
   process.exit(output.passed ? 0 : 1);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  buildValidationOutput,
+  isFiniteNumber,
+  nearlyEqual,
+  timelineEvent,
+  validate,
+};

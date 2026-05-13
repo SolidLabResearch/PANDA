@@ -261,6 +261,17 @@ Use the scenario harness to execute the full scenario matrix and write raw/aggre
 
 The raw result JSON now records protected-resource diagnostics, notification status, ODRL proof status, and the returned protected result body excerpt.
 
+Timing anchors for the protected scenario:
+
+- `query_registered_to_result_received_ms`: WebSocket result path from query registration to the accepted full-window result arriving at the benchmark client.
+- `rsp_emit_to_nurse_read_complete_ms`: protected notification/read path from PANDA's accepted full-window RSP emit anchor to nurse read completion.
+- `end_to_end_replayer_to_nurse_result_read_ms`: full scenario including the replayer-start offset before query registration.
+
+Legacy compatibility metrics are still emitted, but two names remain ambiguous and should be read carefully:
+
+- `rsp_output_to_panda_result_write_ms` includes both the pre-write delay and the write duration.
+- `panda_result_write_to_notification_ms` is now anchored to actual write completion when available; older runs may have approximated this leg from `protected_result.created_at`.
+
 ### Resource usage collection (optional, Linux `/proc` based)
 
 Enable per-run resource sampling with:

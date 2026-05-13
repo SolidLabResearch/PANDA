@@ -1514,7 +1514,25 @@ function metricDefinitions() {
       end_event: 'panda_protected_result_written',
       interpretation: 'Time from the accepted full-window RSP output becoming eligible for materialization until PANDA completed the protected Solid write.',
       critical_path: true,
+      notes: 'Protected scenario only. Legacy compatibility metric: includes pre-write delay plus write duration; prefer rsp_emit_to_protected_write_start_ms and protected_write_start_to_complete_ms for precise breakdown.',
+    },
+    rsp_emit_to_protected_write_start_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_first_any_result_emit_ms',
+      end_event: 'protected_result_write_start',
+      interpretation: 'Time from the accepted full-window RSP output becoming eligible for materialization until PANDA started the protected Solid write.',
+      critical_path: true,
       notes: 'Protected scenario only.',
+    },
+    protected_write_start_to_complete_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'protected_result_write_start',
+      end_event: 'panda_protected_result_written',
+      interpretation: 'Time spent on the protected result resource write itself.',
+      critical_path: true,
+      notes: 'Protected scenario only. Preferred explicit name for the protected Solid write duration.',
     },
     panda_result_write_total_ms: {
       unit: 'ms',
@@ -1523,7 +1541,16 @@ function metricDefinitions() {
       end_event: 'panda_protected_result_written',
       interpretation: 'Time spent on the protected result resource write itself.',
       critical_path: true,
-      notes: 'Protected scenario only.',
+      notes: 'Protected scenario only. Legacy compatibility alias for protected_write_start_to_complete_ms.',
+    },
+    protected_write_complete_to_notification_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'panda_protected_result_written',
+      end_event: 'nurse_notification_received',
+      interpretation: 'Notification delivery latency after PANDA completed the protected Solid write.',
+      critical_path: true,
+      notes: 'Protected scenario only. Uses the actual protected write completion timestamp, not protected_result.created_at.',
     },
     panda_result_write_to_notification_ms: {
       unit: 'ms',
@@ -1532,7 +1559,16 @@ function metricDefinitions() {
       end_event: 'nurse_notification_received',
       interpretation: 'Notification delivery latency after PANDA completed the protected Solid write.',
       critical_path: true,
-      notes: 'Protected scenario only.',
+      notes: 'Protected scenario only. Legacy compatibility metric; now anchored to the actual protected write completion timestamp when available. Older runs may have used protected_result.created_at as a proxy and therefore overstated this leg.',
+    },
+    created_at_to_notification_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'protected_result_created_at',
+      end_event: 'nurse_notification_received',
+      interpretation: 'Notification latency measured from the protected result payload created_at timestamp.',
+      critical_path: false,
+      notes: 'Protected scenario only. Diagnostic metric that preserves the older created_at anchor without treating it as write completion.',
     },
     nurse_notification_to_uma_get_start_ms: {
       unit: 'ms',
@@ -1579,6 +1615,24 @@ function metricDefinitions() {
       critical_path: true,
       notes: 'Protected scenario only.',
     },
+    notification_to_nurse_read_complete_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'nurse_notification_received',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Time from observing the protected result notification until the nurse/caregiver completed the authorized GET.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
+    rsp_emit_to_nurse_read_complete_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_first_any_result_emit_ms',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Protected notification/read path from the accepted full-window RSP output becoming eligible for materialization until the nurse/caregiver completed the authorized GET.',
+      critical_path: true,
+      notes: 'Protected scenario only.',
+    },
     end_to_end_replayer_to_rsp_output_ms: {
       unit: 'ms',
       type: 'direct',
@@ -1595,6 +1649,15 @@ function metricDefinitions() {
       end_event: 'nurse_result_uma_get_complete',
       interpretation: 'Full protected critical path: replayer start to nurse/caregiver authorized GET completion.',
       critical_path: true,
+      notes: 'Protected scenario only. Legacy compatibility alias for replayer_start_to_nurse_read_complete_ms.',
+    },
+    replayer_start_to_nurse_read_complete_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'replayer_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Full protected scenario path from replayer start until the nurse/caregiver completed the authorized GET.',
+      critical_path: true,
       notes: 'Protected scenario only.',
     },
     query_registration_to_nurse_result_read_ms: {
@@ -1603,6 +1666,15 @@ function metricDefinitions() {
       start_event: 'query_register_start',
       end_event: 'nurse_result_uma_get_complete',
       interpretation: 'Time from query registration send until the nurse/caregiver authorized GET completed.',
+      critical_path: true,
+      notes: 'Protected scenario only. Legacy compatibility alias for query_register_to_nurse_read_complete_ms.',
+    },
+    query_register_to_nurse_read_complete_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'query_register_start',
+      end_event: 'nurse_result_uma_get_complete',
+      interpretation: 'Time from query registration send until the nurse/caregiver completed the authorized GET.',
       critical_path: true,
       notes: 'Protected scenario only.',
     },
@@ -1977,16 +2049,24 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       odrl_policy_eval_ms: null,
       nurse_notification_subscribe_ms: raw.metrics.nurse_notification_subscribe_ms ?? null,
       rsp_output_to_panda_result_write_ms: null,
+      rsp_emit_to_protected_write_start_ms: null,
+      protected_write_start_to_complete_ms: null,
       panda_result_write_total_ms: null,
+      protected_write_complete_to_notification_ms: null,
       panda_result_write_to_notification_ms: null,
+      created_at_to_notification_ms: null,
       nurse_notification_to_uma_get_start_ms: null,
       nurse_result_uma_challenge_ms: null,
       nurse_result_token_exchange_ms: null,
       nurse_result_authorized_get_ms: null,
       nurse_result_total_read_ms: null,
+      notification_to_nurse_read_complete_ms: null,
+      rsp_emit_to_nurse_read_complete_ms: null,
       end_to_end_replayer_to_rsp_output_ms: queryResult.firstResultAt - replayerStartedAt,
       end_to_end_replayer_to_nurse_result_read_ms: null,
+      replayer_start_to_nurse_read_complete_ms: null,
       query_registration_to_nurse_result_read_ms: null,
+      query_register_to_nurse_read_complete_ms: null,
     };
     if (serverFirstResult && serverSent) {
       raw.metrics.rsp_first_any_result_emit_processing_ms = raw.metrics.rsp_first_any_result_emit_processing_ms ?? nsDiffMs(serverFirstResult, serverSent);
@@ -2011,7 +2091,15 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       const writeCompletedNs = parseNs(timing.protected_result_write_completed_at_ns);
       const protectedSourceNs = parseNs(timing.protected_result_source_emitted_at_ns);
       raw.metrics.rsp_output_to_panda_result_write_ms = nsDiffMs(protectedSourceNs, writeCompletedNs);
+      raw.metrics.rsp_emit_to_protected_write_start_ms = nsDiffMs(protectedSourceNs, writeStartedNs);
+      raw.metrics.protected_write_start_to_complete_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
       raw.metrics.panda_result_write_total_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+      if (writeStartedNs) {
+        const writeStartedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeStartedNs);
+        if (Number.isFinite(writeStartedRelMs)) {
+          sequence.protected_result_write_started = addMsToIso(queryResult.querySendWall, writeStartedRelMs);
+        }
+      }
       if (writeCompletedNs) {
         const writeCompletedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeCompletedNs);
         if (Number.isFinite(writeCompletedRelMs)) {
@@ -2025,10 +2113,18 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       sequence.nurse_notification_received = notification.received_at;
       raw.protected_result_flow.notification_received = notification;
       const notificationTimeMs = Date.parse(notification.received_at);
-      const writeCompletedAtIso = protectedResultPayload?.created_at || sequence.panda_protected_result_written || null;
+      const writeCompletedAtIso = sequence.panda_protected_result_written || null;
       const writeCompletedAtMs = writeCompletedAtIso ? Date.parse(writeCompletedAtIso) : NaN;
+      const protectedCreatedAtIso = protectedResultPayload?.created_at || null;
+      const protectedCreatedAtMs = protectedCreatedAtIso ? Date.parse(protectedCreatedAtIso) : NaN;
+      raw.metrics.protected_write_complete_to_notification_ms = Number.isFinite(writeCompletedAtMs)
+        ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
+        : null;
       raw.metrics.panda_result_write_to_notification_ms = Number.isFinite(writeCompletedAtMs)
         ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
+        : null;
+      raw.metrics.created_at_to_notification_ms = Number.isFinite(protectedCreatedAtMs)
+        ? Math.max(0, notificationTimeMs - protectedCreatedAtMs)
         : null;
 
       markEvent('nurse_result_uma_get_start');
@@ -2043,8 +2139,18 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       raw.metrics.nurse_result_total_read_ms = (protectedRead.challenge?.durationMs ?? 0)
         + (protectedRead.token?.durationMs ?? 0)
         + (protectedRead.authorized?.durationMs ?? 0);
+      raw.metrics.notification_to_nurse_read_complete_ms = events.nurse_result_uma_get_complete.t - events.nurse_notification_received.t;
+      raw.metrics.rsp_emit_to_nurse_read_complete_ms = Number.isFinite(raw.metrics.rsp_output_to_panda_result_write_ms)
+        && Number.isFinite(raw.metrics.protected_write_complete_to_notification_ms)
+        && Number.isFinite(raw.metrics.notification_to_nurse_read_complete_ms)
+        ? raw.metrics.rsp_output_to_panda_result_write_ms
+          + raw.metrics.protected_write_complete_to_notification_ms
+          + raw.metrics.notification_to_nurse_read_complete_ms
+        : null;
       raw.metrics.query_registration_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - queryResult.querySendAt;
+      raw.metrics.query_register_to_nurse_read_complete_ms = raw.metrics.query_registration_to_nurse_result_read_ms;
       raw.metrics.end_to_end_replayer_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - replayer.startedAtPerf;
+      raw.metrics.replayer_start_to_nurse_read_complete_ms = raw.metrics.end_to_end_replayer_to_nurse_result_read_ms;
       raw.protected_result_flow.returned_body_excerpt = protectedRead.authorized?.body?.slice(0, 320) ?? '';
       raw.protected_result_flow.returned_body_parsed = protectedRead.parsedBody;
       raw.protected_result_flow.odrl_proof = protectedRead.odrlProof;

@@ -70,15 +70,8 @@ function parseJsonLines(filePath) {
     .filter(Boolean);
 }
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const runRoot = path.join(ROOT, 'benchmarks', 'results', 'runs', opts.benchmarkId);
-  const rawDir = path.join(runRoot, 'raw');
-  const allFiles = fs.readdirSync(rawDir)
-    .filter((file) => file.endsWith('.json'))
-    .map((file) => JSON.parse(fs.readFileSync(path.join(rawDir, file), 'utf8')));
-  // Exclude warmup artifacts and legacy negative run ids from aggregation.
-  const rows = allFiles.filter((row) => (
+function buildSummary(rows, benchmarkId) {
+  const completeRows = rows.filter((row) => (
     (row.phase === 'measured' || (typeof row.run_id === 'number' && row.run_id > 0))
     && row.status === 'complete' && row.output_check?.passed === true
   ));
@@ -87,7 +80,7 @@ function main() {
   const unavailableMetrics = new Set();
   const missingDefinitions = new Set();
   const firstAnyResultClassifications = new Set();
-  for (const row of rows) {
+  for (const row of completeRows) {
     const definitions = row.metric_definitions || {};
     if (typeof row.rsp_first_any_result_classification === 'string' && row.rsp_first_any_result_classification.length > 0) {
       firstAnyResultClassifications.add(row.rsp_first_any_result_classification);
@@ -120,9 +113,17 @@ function main() {
     'replayer_start_to_query_register_ms',
     'query_registered_to_result_received_ms',
     'end_to_end_replayer_to_rsp_output_ms',
+    'rsp_emit_to_protected_write_start_ms',
+    'protected_write_start_to_complete_ms',
+    'protected_write_complete_to_notification_ms',
+    'notification_to_nurse_read_complete_ms',
+    'rsp_emit_to_nurse_read_complete_ms',
+    'query_register_to_nurse_read_complete_ms',
+    'replayer_start_to_nurse_read_complete_ms',
     'rsp_output_to_panda_result_write_ms',
     'panda_result_write_total_ms',
     'panda_result_write_to_notification_ms',
+    'created_at_to_notification_ms',
     'nurse_notification_to_uma_get_start_ms',
     'nurse_result_uma_challenge_ms',
     'nurse_result_token_exchange_ms',
@@ -133,15 +134,15 @@ function main() {
   ];
   const lowerNMetrics = [];
   for (const metric of Array.from(metricNames).sort()) {
-    const values = rows
+    const values = completeRows
       .map((row) => row.metrics?.[metric] ?? row[metric])
       .filter((value) => isFiniteNumber(value));
     metrics[metric] = summarize(values);
-    if (values.length < rows.length) {
+    if (values.length < completeRows.length) {
       lowerNMetrics.push({
         metric,
         n: values.length,
-        complete_valid_runs: rows.length,
+        complete_valid_runs: completeRows.length,
       });
     }
   }
@@ -149,7 +150,7 @@ function main() {
   const MB = 1024 * 1024;
   const resourceByLabel = {};
   const resourceWarnings = [];
-  for (const row of rows) {
+  for (const row of completeRows) {
     const samplePathRelative = row?.resource_usage?.samples_path;
     if (!samplePathRelative) {
       resourceWarnings.push({
@@ -207,9 +208,9 @@ function main() {
   }
 
   const output = {
-    benchmark_id: opts.benchmarkId,
+    benchmark_id: benchmarkId,
     generated_at: new Date().toISOString(),
-    complete_valid_runs: rows.length,
+    complete_valid_runs: completeRows.length,
     metrics,
     warnings: {
       unavailable_metrics: Array.from(unavailableMetrics).sort(),
@@ -223,6 +224,17 @@ function main() {
       .map((metric) => ({ metric, summary: metrics[metric] })),
     resource_metrics: resourceMetrics,
   };
+  return output;
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const runRoot = path.join(ROOT, 'benchmarks', 'results', 'runs', opts.benchmarkId);
+  const rawDir = path.join(runRoot, 'raw');
+  const rows = fs.readdirSync(rawDir)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => JSON.parse(fs.readFileSync(path.join(rawDir, file), 'utf8')));
+  const output = buildSummary(rows, opts.benchmarkId);
   const outPath = path.join(runRoot, 'aggregated', 'summary.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(output, null, 2)}\n`);
@@ -230,4 +242,13 @@ function main() {
   console.log(`aggregate_path=${outPath}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  buildSummary,
+  isFiniteNumber,
+  percentile,
+  summarize,
+};
