@@ -27,11 +27,7 @@ ENV_FILE="$LOG_ROOT/latest-odrl-log.env"
 PID_FILE="$LOG_ROOT/latest.pid"
 CSS_STATE_PATH="$UMA_DIR/$CSS_STATE_REL"
 UMA_STATE_PATH="$UMA_DIR/$UMA_STATE_REL"
-if [[ "$USE_PAT_INIT" == "true" ]]; then
-  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json ./config/init-pat.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
-else
-  START_CMD="corepack yarn workspace @solidlab/uma run start:odrl & corepack yarn workspace @solidlab/uma-css run community-solid-server -m . -c ./config/file-backed.json --seedConfig ./config/seed.json -f ./${CSS_STATE_REL#packages/css/}"
-fi
+START_CMD="corepack yarn start:odrl"
 
 ln -sfn "$LOG_FILE" "$LATEST_LINK"
 printf 'export PANDA_UMA_ODRL_LOG_FILE="%s"\n' "$LOG_FILE" > "$ENV_FILE"
