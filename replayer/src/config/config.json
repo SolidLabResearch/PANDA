@@ -1,0 +1,12 @@
+{
+  "streams": [
+    {
+      "location": "http://localhost:3000/alice/spo2/",
+      "file_location": "../../data/heart.nt"
+    }
+  ],
+  "frequency_event": 1.49,
+  "frequency_buffer": 1.49,
+  "is_ldes": false,
+  "tree_path": "https://saref.etsi.org/core/hasTimestamp"
+}
