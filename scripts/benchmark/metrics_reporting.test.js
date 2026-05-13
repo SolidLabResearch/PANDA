@@ -47,6 +47,30 @@ function enrichProtectedMetrics(row) {
     row.metrics.rsp_output_to_panda_result_write_ms + writeCompleteToNotification + notificationToReadComplete;
   row.metrics.query_register_to_nurse_read_complete_ms = row.metrics.query_registration_to_nurse_result_read_ms;
   row.metrics.replayer_start_to_nurse_read_complete_ms = row.metrics.end_to_end_replayer_to_nurse_result_read_ms;
+  row.stream_semantics = {
+    signal: 'heart_rate',
+    alert_value: 'ELEVATED_HEART_RATE',
+    threshold_relation: 'math:greaterThan',
+    threshold_value: 99.9,
+  };
+  row.replayer_process = {
+    ...(row.replayer_process || {}),
+    command: 'node scripts/benchmark/run_real_stream_replayer.js --target-url http://localhost:3000/alice/heart-rate/',
+    real_replayer_metadata: {
+      fake_replayer_used: false,
+      replayer_repo_dir: '/tmp/policy-aware-decentralized-stream-replayer',
+    },
+  };
+  row.protected_result_flow.websocket_protected_result = {
+    ...(row.protected_result_flow.websocket_protected_result || {}),
+    status: 'written',
+    alert: 'ELEVATED_HEART_RATE',
+  };
+  row.protected_result_flow.returned_body_parsed = {
+    ...(row.protected_result_flow.returned_body_parsed || {}),
+    sourceEventId: 'http://example.org/panda-benchmark/current-run/heart/111',
+    actualValue: '101.04800251676892',
+  };
 
   [
     'rsp_emit_to_protected_write_start_ms',

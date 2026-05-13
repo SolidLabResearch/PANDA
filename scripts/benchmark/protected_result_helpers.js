@@ -297,6 +297,7 @@ function parseProtectedResultTurtle(body) {
     rspWindowEnd: extractLiteralOrUri(quads, 'rspWindowEnd'),
     rspResultTimestamp: extractLiteralOrUri(quads, 'rspResultTimestamp'),
     derivedFrom: extractLiteralOrUri(quads, 'derivedFrom'),
+    alert: extractLiteralOrUri(quads, 'alert'),
     createdAt: extractLiteralOrUri(quads, 'createdAt'),
     actualValue: extractLiteralOrUri(quads, 'actualValue'),
   };

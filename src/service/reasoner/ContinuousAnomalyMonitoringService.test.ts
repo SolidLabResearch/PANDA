@@ -38,14 +38,14 @@ test('singleton instance refreshes rules between registrations', async () => {
     expect(result).not.toContain('<https://rsp.js/aggregation_event/2> <http://example.org/#status> <http://example.org/#lowSpo2> .');
 });
 
-test('does not infer low SpO2 alert for xsd:float value 94', async () => {
+test('does not infer elevated heart-rate alert for xsd:float value 94', async () => {
     const rules = `
 @prefix saref: <https://saref.etsi.org/core/> .
 @prefix math: <http://www.w3.org/2000/10/swap/math#> .
 @prefix ex: <http://example.org/> .
 
-{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. }
-=> { ?s ex:alert "SPO2_LOW". }.
+{ ?s saref:hasValue ?value . ?value math:greaterThan 99.9. }
+=> { ?s ex:alert "ELEVATED_HEART_RATE". }.
 `;
     const data = '<https://rsp.js/aggregation_event/94> <https://saref.etsi.org/core/hasValue> "94"^^<http://www.w3.org/2001/XMLSchema#float> .';
 
@@ -56,16 +56,16 @@ test('does not infer low SpO2 alert for xsd:float value 94', async () => {
     expect(ContinuousAnomalyMonitoringService.outputContainsAlertTriple(result)).toBe(false);
 });
 
-test('infers low SpO2 alert for xsd:float value 89', async () => {
+test('infers elevated heart-rate alert for xsd:float value 101', async () => {
     const rules = `
 @prefix saref: <https://saref.etsi.org/core/> .
 @prefix math: <http://www.w3.org/2000/10/swap/math#> .
 @prefix ex: <http://example.org/> .
 
-{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. }
-=> { ?s ex:alert "SPO2_LOW". }.
+{ ?s saref:hasValue ?value . ?value math:greaterThan 99.9. }
+=> { ?s ex:alert "ELEVATED_HEART_RATE". }.
 `;
-    const data = '<https://rsp.js/aggregation_event/89> <https://saref.etsi.org/core/hasValue> "89"^^<http://www.w3.org/2001/XMLSchema#float> .';
+    const data = '<https://rsp.js/aggregation_event/101> <https://saref.etsi.org/core/hasValue> "101"^^<http://www.w3.org/2001/XMLSchema#float> .';
 
     const reasoner = ContinuousAnomalyMonitoringService.getInstance(rules);
     const result = await reasoner.reason(data);
@@ -73,9 +73,9 @@ test('infers low SpO2 alert for xsd:float value 89', async () => {
 
     expect(quads).toEqual(expect.arrayContaining([
         expect.objectContaining({
-            subject: expect.objectContaining({ value: 'https://rsp.js/aggregation_event/89' }),
+            subject: expect.objectContaining({ value: 'https://rsp.js/aggregation_event/101' }),
             predicate: expect.objectContaining({ value: 'http://example.org/alert' }),
-            object: expect.objectContaining({ value: 'SPO2_LOW' }),
+            object: expect.objectContaining({ value: 'ELEVATED_HEART_RATE' }),
         }),
     ]));
     expect(ContinuousAnomalyMonitoringService.outputContainsAlertTriple(result)).toBe(true);

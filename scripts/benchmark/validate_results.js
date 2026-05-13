@@ -130,8 +130,13 @@ function validate(row) {
   if (isProtectedScenario) {
     const protectedFlow = row.protected_result_flow || {};
     const body = protectedFlow.returned_body_parsed || {};
+    const semantics = row.stream_semantics || {};
+    const replayerMetadata = row.replayer_process?.real_replayer_metadata || {};
     requireCheck(protectedFlow.websocket_protected_result?.status === 'written', 'protected result was not written successfully by PANDA');
     requireCheck(typeof protectedFlow.protected_result_url === 'string' && protectedFlow.protected_result_url.length > 0, 'protected_result_url must be recorded');
+    requireCheck(!/live_spo2_replayer\.js/.test(String(row.replayer_process?.command || '')), 'fake replayer still used for protected scenario');
+    requireCheck(replayerMetadata.fake_replayer_used === false, 'protected scenario did not record real replayer metadata');
+    requireCheck(typeof replayerMetadata.replayer_repo_dir === 'string' && replayerMetadata.replayer_repo_dir.length > 0, 'real replayer repo path was not recorded');
     requireCheck(protectedFlow.public_preflight_status !== 200, 'anonymous/public read returned 200 for protected resource');
     requireCheck(protectedFlow.notification_subscription_status === 'subscribed', 'notification subscription did not succeed');
     requireCheck(protectedFlow.notification_received?.matchesExpected === true, 'relevant Solid notification was not observed');
@@ -140,7 +145,14 @@ function validate(row) {
     requireCheck(body.benchmarkRunId === row.benchmark_run_id, 'returned protected result body benchmarkRunId does not match current run');
     requireCheck(body.derivedFrom === 'rsp-query-result', 'returned protected result body derivedFrom is not rsp-query-result');
     requireCheck(body.rspQueryHash === row.message_query_hash, 'returned protected result body rspQueryHash does not match accepted RSP output');
+    requireCheck(typeof body.sourceEventId === 'string' && body.sourceEventId.length > 0 && body.sourceEventId !== 'unknown', 'returned protected result body sourceEventId is missing or stale');
+    requireCheck(typeof body.rspWindowStart === 'string' && typeof body.rspWindowEnd === 'string', 'returned protected result body rspWindowStart/rspWindowEnd missing');
     requireCheck(protectedFlow.stale_content_detected !== true, 'stale protected result content satisfied the benchmark');
+    requireCheck(body.alert === 'ELEVATED_HEART_RATE' || JSON.stringify(protectedFlow.websocket_protected_result || {}).includes('ELEVATED_HEART_RATE'), 'elevated heart-rate alert was not present in the accepted RSP result');
+    requireCheck(!JSON.stringify(row).includes('SPO2_LOW'), 'old SPO2_LOW rule still present in protected benchmark output');
+    requireCheck(semantics.alert_value === 'ELEVATED_HEART_RATE', 'protected scenario semantics did not declare ELEVATED_HEART_RATE');
+    requireCheck(semantics.threshold_relation === 'math:greaterThan' && Number(semantics.threshold_value) === 99.9, 'protected scenario semantics did not record heart-rate threshold > 99.9');
+    requireCheck(Number(body.actualValue) > 99.9, 'no elevated heart-rate event crossed the > 99.9 threshold in the protected result body');
     requireCheck(isFiniteNumber(m.nurse_result_total_read_ms) && m.nurse_result_total_read_ms > 0, 'nurse_result_total_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.end_to_end_replayer_to_nurse_result_read_ms) && m.end_to_end_replayer_to_nurse_result_read_ms > 0, 'end_to_end_replayer_to_nurse_result_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.query_registration_to_nurse_result_read_ms) && m.query_registration_to_nurse_result_read_ms > 0, 'query_registration_to_nurse_result_read_ms must exist and be > 0');

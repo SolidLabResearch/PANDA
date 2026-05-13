@@ -1,6 +1,6 @@
 {
   "scenario_id": "uma-replayer-panda-derived-anomaly-e2e",
-  "description": "Protected benchmark where PANDA materializes the first full-window RSP result into a protected Solid resource and the run completes only after nurse notification plus UMA-authorized GET.",
+  "description": "Protected benchmark where the real decentralized replayer posts heart-rate observations, PANDA materializes the first full-window elevated-heart-rate RSP result into a protected Solid resource, and the run completes only after nurse notification plus UMA-authorized GET.",
   "query_window_seconds": 60,
   "replayer_duration_seconds": 120,
   "query_registration_delay_after_replayer_start_seconds": 10,
@@ -10,6 +10,13 @@
     "derived_latest_url": "http://localhost:3000/alice/derived/latest",
     "alert_container_url": "http://localhost:3000/alice/derived/anomaly-alert/",
     "protected_rsp_result_container_url": "http://localhost:3000/alice/protected-rsp-results/"
+  },
+  "stream_semantics": {
+    "signal": "heart_rate",
+    "expected_property_iri": "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/org.dyamand.types.health.HeartRate",
+    "alert_value": "ELEVATED_HEART_RATE",
+    "threshold_relation": "math:greaterThan",
+    "threshold_value": 99.9
   },
   "protected_result": {
     "container_url": "http://localhost:3000/alice/protected-rsp-results/",
@@ -27,10 +34,10 @@
   "panda_query_payload": {
     "type": "live",
     "actor_webid": "http://localhost:3000/alice/profile/card#me",
-    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (AVG(?o) AS ?avg)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE {query_window_ms} STEP 60000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
-    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" }. \n"
+    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (MAX(?o) AS ?value) (SAMPLE(?s) AS ?sourceEventId)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE {query_window_ms} STEP 60000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
+    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?value . ?value math:greaterThan 99.9 . } => { ?s ex:alert \"ELEVATED_HEART_RATE\" }.\n"
   },
-  "replayer_command": "node scripts/benchmark/live_spo2_replayer.js --url http://localhost:3000/alice/spo2/ --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id}",
+  "replayer_command": "node scripts/benchmark/run_real_stream_replayer.js --target-url http://localhost:3000/alice/spo2/ --dataset-relative-path data/heart.nt --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id} --raw-dir \"{run_raw_dir}\"",
   "expected_decision": "allow",
   "expected_result_shape": {
     "type": "websocket_json",

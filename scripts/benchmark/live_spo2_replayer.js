@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Deprecated for protected benchmarks. Keep only for baseline compatibility.
 const { randomUUID } = require('crypto');
 const { performance } = require('perf_hooks');
 

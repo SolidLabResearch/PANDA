@@ -340,6 +340,43 @@ function renderUrlTemplate(template, benchmarkRunId) {
   return String(template || '').replace(/\{benchmark_run_id\}/g, benchmarkRunId);
 }
 
+function containerPathFromUrl(url) {
+  return new URL(url).pathname.replace(/^\/+|\/+$/g, '');
+}
+
+function tokenizeCommand(command) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === '\'') {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
 function getProtectedResultConfig(scenario, benchmarkRunId) {
   if (scenario?.benchmark_mode !== 'protected_rsp_result' || !scenario?.protected_result) {
     return null;
@@ -467,23 +504,26 @@ async function startUma(opts, runRoot, runId) {
 async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses, benchmarkRunId) {
   const startedContainersAt = performance.now();
   const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
+  const streamPath = containerPathFromUrl(scenario.target_css_resources.stream_container_url);
+  const alertPath = containerPathFromUrl(scenario.target_css_resources.alert_container_url);
+  const protectedResultPath = protectedResult ? containerPathFromUrl(protectedResult.container_url) : null;
   const dirs = [
     '',
     'alice',
-    'alice/spo2',
+    streamPath,
     'alice/derived',
-    'alice/derived/anomaly-alert',
+    alertPath,
   ];
-  if (protectedResult) {
-    dirs.push('alice/protected-rsp-results');
+  if (protectedResultPath) {
+    dirs.push(protectedResultPath);
   }
   for (const dir of dirs) {
     ensureDir(path.join(cssStatePath, dir));
   }
   const containerUrls = [
-    'http://localhost:3000/alice/spo2/',
+    scenario.target_css_resources.stream_container_url,
     'http://localhost:3000/alice/derived/',
-    'http://localhost:3000/alice/derived/anomaly-alert/',
+    scenario.target_css_resources.alert_container_url,
   ];
   if (protectedResult) {
     containerUrls.push(protectedResult.container_url);
@@ -526,17 +566,17 @@ async function createContainersAndPolicies(scenario, cssStatePath, httpStatuses,
       '',
       '<> derived:derivedResource [',
       '  derived:template "derived/latest";',
-      '  derived:selector "http://localhost:3000/alice/spo2/*";',
+      `  derived:selector "${scenario.target_css_resources.stream_container_url}*";`,
       '  derived:filter "latest"',
       '].',
       '',
     ].join('\n')],
-    ['alice/spo2/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+    [`${streamPath}/.meta`, '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
     ['alice/derived/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
-    ['alice/derived/anomaly-alert/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
+    [`${alertPath}/.meta`, '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n'],
   ]);
   if (protectedResult) {
-    metaFiles.set('alice/protected-rsp-results/.meta', '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n');
+    metaFiles.set(`${protectedResultPath}/.meta`, '<> a <http://www.w3.org/ns/ldp#BasicContainer> .\n');
   }
   for (const [relativePath, content] of metaFiles) {
     fs.writeFileSync(path.join(cssStatePath, relativePath), content);
@@ -603,14 +643,16 @@ function parseAuthenticateHeader(wwwAuthenticateHeader) {
 }
 
 async function exchangeToken(tokenEndpoint, ticket) {
+  const claimToken = process.env.PANDA_UMA_CLAIM_TOKEN || 'http://localhost:3000/alice/profile/card#me';
+  const claimTokenFormat = process.env.PANDA_UMA_CLAIM_TOKEN_FORMAT || 'urn:solidlab:uma:claims:formats:webid';
   const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
       ticket,
-      claim_token: encodeURIComponent('http://localhost:3000/alice/profile/card#me'),
-      claim_token_format: 'urn:solidlab:uma:claims:formats:webid',
+      claim_token: encodeURIComponent(claimToken),
+      claim_token_format: claimTokenFormat,
     }),
   });
   const body = await response.text();
@@ -626,9 +668,9 @@ function makeOdrlPolicy(scenario, benchmarkRunId) {
   const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
   const metaTargets = [
     'http://localhost:3000/alice/.meta',
-    'http://localhost:3000/alice/spo2/.meta',
+    `${stream}.meta`,
     'http://localhost:3000/alice/derived/.meta',
-    'http://localhost:3000/alice/derived/anomaly-alert/.meta',
+    `${alert}.meta`,
   ];
   if (protectedResult) {
     metaTargets.push('http://localhost:3000/alice/protected-rsp-results/.meta');
@@ -711,7 +753,7 @@ async function startPanda(runRoot, runId, scenario, benchmarkRunId) {
     env: {
       ...process.env,
       BENCHMARK_TIMING: '1',
-      PANDA_EXPECTED_PROPERTY_IRI: 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      PANDA_EXPECTED_PROPERTY_IRI: scenario.stream_semantics?.expected_property_iri || 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
       ...(protectedResult ? {
         PANDA_BENCHMARK_PROTECTED_RESULT_URL: protectedResult.resource_url,
         PANDA_BENCHMARK_SCENARIO_ID: scenario.scenario_id,
@@ -730,10 +772,11 @@ async function runReplayer(scenario, opts, runRoot, benchmarkRunId, counters) {
   const command = renderTemplate(scenario.replayer_command, {
     replayer_duration_seconds: opts.replayerDuration,
     benchmark_run_id: benchmarkRunId,
+    run_raw_dir: path.join(runRoot, 'raw'),
   });
   const logFile = path.join(runRoot, 'raw', `replayer-${benchmarkRunId}.log`);
   ensureFileExists(logFile);
-  const [cmd, ...args] = command.split(/\s+/);
+  const [cmd, ...args] = tokenizeCommand(command);
   const stopWatcher = startReplayerLogWatcher(logFile, counters);
   const startedAtPerf = performance.now();
   const startedAtWall = isoNow();
@@ -1857,6 +1900,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     scenario_id: scenario.scenario_id,
     benchmark_mode: scenario.benchmark_mode || 'baseline_websocket_result',
     scenario_file_path: scenario.__scenario_file || null,
+    stream_semantics: scenario.stream_semantics || null,
     run_id: runId,
     phase,
     mode: opts.mode,
@@ -2174,6 +2218,10 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       exit_signal: replayerExitInfo.signal,
       actual_process_runtime_ms: replayerExitInfo.exitedAtPerf - replayer.startedAtPerf,
     };
+    const replayerMetadataPath = path.join(runRoot, 'raw', `real-replayer-metadata-${benchmarkRunId}.json`);
+    if (fs.existsSync(replayerMetadataPath)) {
+      raw.replayer_process.real_replayer_metadata = readJson(replayerMetadataPath);
+    }
     raw.metrics.replayer_total_runtime_ms = raw.replayer_process.actual_process_runtime_ms;
     raw.metrics.replayer_events_posted_after_query_registration = Math.max(0, counters.posted - queryRegisterPostedCount);
     raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);

@@ -251,13 +251,39 @@ Use the scenario harness to execute the full scenario matrix and write raw/aggre
 
 ### Protected RSP-result scenario
 
-`benchmarks/scenarios/10-uma-replayer-panda-derived-anomaly-e2e.json` extends the baseline live-window benchmark without changing the 60s query semantics:
+`benchmarks/scenarios/10-uma-replayer-panda-derived-anomaly-e2e.json` now uses the real decentralized stream replayer for elevated heart-rate detection:
 
-- the replayer writes source SpO2 observations
-- PANDA emits the first full-window RSP result
+- the real replayer posts heart-rate observations to `http://localhost:3000/alice/spo2/`
+- PANDA waits for the first full-window result whose rule output is `ELEVATED_HEART_RATE`
 - PANDA writes that result to `http://localhost:3000/alice/protected-rsp-results/<benchmark-run-id>.ttl`
 - the benchmark runner waits for the Solid notification on that protected resource
 - the benchmark completes only after the nurse/caregiver performs the UMA challenge, token exchange, and authorized GET
+
+Protected scenarios must not fall back to `scripts/benchmark/live_spo2_replayer.js`. That script remains only for the baseline scenario and is deprecated there.
+The `/alice/spo2/` path is kept here as a transport-compatibility path only; the replayed payload, expected property IRI, rule, and validation semantics are heart-rate.
+
+The protected scenario invokes the real replayer through:
+
+```bash
+node scripts/benchmark/run_real_stream_replayer.js \
+  --target-url http://localhost:3000/alice/spo2/ \
+  --dataset-relative-path data/heart.nt \
+  --duration <seconds> \
+  --benchmark-run-id <benchmark-run-id> \
+  --raw-dir <benchmarks/results/runs/.../raw>
+```
+
+The wrapper resolves the repo from `PANDA_STREAM_REPLAYER_REPO_DIR`, defaulting to `../policy-aware-decentralized-stream-replayer`, and also accepts the in-repo checkout used in this workspace. It writes:
+
+- `raw/real-replayer-config-<benchmark-run-id>.json`
+- `raw/real-replayer-metadata-<benchmark-run-id>.json`
+
+Required environment variables for the protected benchmark:
+
+- `PANDA_STREAM_REPLAYER_REPO_DIR`: optional override for the real replayer repo path
+- `PANDA_UMA_ODRL_LOG_FILE`: required for live ODRL proof validation
+- `PANDA_UMA_CLAIM_TOKEN`: claim token used by PANDA and the real replayer
+- `PANDA_UMA_CLAIM_TOKEN_FORMAT`: optional, defaults to `urn:solidlab:uma:claims:formats:webid`
 
 The raw result JSON now records protected-resource diagnostics, notification status, ODRL proof status, and the returned protected result body excerpt.
 
@@ -296,10 +322,15 @@ Timestamps are relative to sampler start (`timestamp_ms`), with periodic samples
 **Smoke run example** (quick test with 3 measured runs per scenario):
 
 ```bash
+export PANDA_STREAM_REPLAYER_REPO_DIR="/absolute/path/to/policy-aware-decentralized-stream-replayer"
+export PANDA_UMA_ODRL_LOG_FILE="/absolute/path/to/uma-odrl-<timestamp>.log"
+export PANDA_UMA_CLAIM_TOKEN="http://localhost:3000/bob/profile/card#me"
+
 node scripts/benchmark/run_all_scenarios.js \
   --mode smoke \
   --runs 3 \
   --warmup 0 \
+  --only-scenario uma-replayer-panda-derived-anomaly-e2e \
   --collect-resource-usage \
   --resource-sample-interval-ms 500
 ```

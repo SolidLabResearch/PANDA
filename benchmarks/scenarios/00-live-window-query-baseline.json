@@ -22,6 +22,7 @@
     "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" }. \n"
   },
   "replayer_command": "node scripts/benchmark/live_spo2_replayer.js --url http://localhost:3000/alice/spo2/ --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id}",
+  "replayer_deprecated": true,
   "expected_decision": "allow",
   "expected_result_shape": {
     "type": "websocket_json",

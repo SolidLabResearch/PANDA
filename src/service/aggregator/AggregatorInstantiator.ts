@@ -847,6 +847,7 @@ export class AggregatorInstantiator {
    bench:rspWindowEnd "${input.rspWindowEndIso}"^^xsd:dateTime ;
    bench:rspResultTimestamp "${input.rspResultTimestampIso}"^^xsd:dateTime ;
    bench:derivedFrom "rsp-query-result" ;
+   bench:alert "ELEVATED_HEART_RATE" ;
    bench:createdAt "${input.createdAtIso}"^^xsd:dateTime ;
    bench:actualValue "${input.actualValue}"^^xsd:decimal .
 `;
