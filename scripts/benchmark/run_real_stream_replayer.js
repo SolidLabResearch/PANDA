@@ -2,10 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { siblingDefaults, ensureRepoExists } = require('./workspace_paths');
+const { repoRoot, workspaceRoot, siblingDefaults } = require('./workspace_paths');
 
 const DEFAULT_STREAM_REPLAYER_REPO = siblingDefaults.replayerRepo;
-const FALLBACK_IN_REPO_REPLAYER = path.resolve(__dirname, '..', '..', 'policy-aware-decentralized-stream-replayer');
+const IN_REPO_REPLAYER = path.join(repoRoot, 'replayer');
+const FALLBACK_WORKSPACE_REPLAYER = path.join(workspaceRoot, 'policy-aware-decentralized-stream-replayer');
 const DEFAULT_STREAM_URL = 'http://localhost:3000/alice/heart-rate/';
 const DEFAULT_DATASET = 'data/heart.nt';
 const DEFAULT_CLAIM_TOKEN_FORMAT = 'urn:solidlab:uma:claims:formats:webid';
@@ -16,7 +17,7 @@ function parseArgs(argv) {
     durationSeconds: 120,
     targetUrl: DEFAULT_STREAM_URL,
     datasetRelativePath: DEFAULT_DATASET,
-    replayerRepoDir: process.env.PANDA_STREAM_REPLAYER_REPO_DIR || DEFAULT_STREAM_REPLAYER_REPO,
+    replayerRepoDir: process.env.PANDA_REPLAYER_REPO_DIR || process.env.PANDA_STREAM_REPLAYER_REPO_DIR || null,
     rawDir: null,
     claimToken: process.env.PANDA_UMA_CLAIM_TOKEN || 'http://localhost:3000/alice/profile/card#me',
     claimTokenFormat: process.env.PANDA_UMA_CLAIM_TOKEN_FORMAT || DEFAULT_CLAIM_TOKEN_FORMAT,
@@ -38,22 +39,38 @@ function parseArgs(argv) {
   return out;
 }
 
-function resolveExistingRepo(repoDir) {
+function isUsableReplayerRepo(repoDir) {
+  if (!repoDir || !fs.existsSync(repoDir)) return false;
+  const packageJsonPath = path.join(repoDir, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) return false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    return typeof pkg.scripts?.replay === 'string' && pkg.scripts.replay.length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function resolveReplayerRepo(cliRepoDir = null) {
+  const explicitRepoDir = cliRepoDir || process.env.PANDA_REPLAYER_REPO_DIR || process.env.PANDA_STREAM_REPLAYER_REPO_DIR || null;
   const candidates = [
-    path.resolve(repoDir),
-    FALLBACK_IN_REPO_REPLAYER,
-  ];
+    explicitRepoDir,
+    IN_REPO_REPLAYER,
+    DEFAULT_STREAM_REPLAYER_REPO,
+  ].filter(Boolean).map((candidate) => path.resolve(candidate));
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
+    if (isUsableReplayerRepo(candidate)) {
       return candidate;
     }
   }
-  ensureRepoExists(path.resolve(repoDir), {
-    label: 'policy-aware-decentralized-stream-replayer',
-    envVarName: 'PANDA_STREAM_REPLAYER_REPO_DIR',
-    cliFlagName: '--replayer-repo-dir',
-  });
-  return path.resolve(repoDir);
+  const attempted = Array.from(new Set(candidates));
+  const lines = [
+    '[benchmark-replayer] No usable real stream replayer package found.',
+    ...attempted.map((candidate) => `  attempted: ${candidate}`),
+    '  usable package requirements: package.json with an npm "replay" script',
+    '  overrides: PANDA_REPLAYER_REPO_DIR, PANDA_STREAM_REPLAYER_REPO_DIR, --replayer-repo-dir',
+  ];
+  throw new Error(lines.join('\n'));
 }
 
 function countObservations(datasetPath) {
@@ -78,7 +95,7 @@ function ensureBuilt(repoDir) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const repoDir = resolveExistingRepo(opts.replayerRepoDir);
+  const repoDir = resolveReplayerRepo(opts.replayerRepoDir);
   const datasetPath = path.resolve(repoDir, opts.datasetRelativePath);
   if (!fs.existsSync(datasetPath)) {
     throw new Error(`Real replayer dataset not found at ${datasetPath}`);
@@ -106,6 +123,7 @@ function main() {
   fs.writeFileSync(metadataPath, `${JSON.stringify({
     benchmark_run_id: opts.benchmarkRunId,
     replayer_repo_dir: repoDir,
+    resolved_replayer_repo_dir: repoDir,
     dataset_path: datasetPath,
     target_url: opts.targetUrl,
     duration_seconds: opts.durationSeconds,
@@ -136,4 +154,14 @@ function main() {
   process.exit(child.status ?? 1);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  IN_REPO_REPLAYER,
+  FALLBACK_WORKSPACE_REPLAYER,
+  isUsableReplayerRepo,
+  resolveReplayerRepo,
+  parseArgs,
+};
