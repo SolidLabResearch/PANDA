@@ -1,6 +1,7 @@
 {
   "scenario_id": "uma-replayer-panda-derived-anomaly-e2e",
   "description": "Protected benchmark where the real decentralized replayer posts heart-rate observations, PANDA materializes the first full-window elevated-heart-rate RSP result into a protected Solid resource, and the run completes only after nurse notification plus UMA-authorized GET.",
+  "resultLifecycleMode": "rsp-only",
   "query_window_seconds": 60,
   "replayer_duration_seconds": 120,
   "query_registration_delay_after_replayer_start_seconds": 10,

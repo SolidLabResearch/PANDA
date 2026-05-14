@@ -1,6 +1,7 @@
 {
   "scenario_id": "live-window-query-baseline",
   "description": "Baseline PANDA live stream query registered while the SPO2 replayer is actively posting.",
+  "resultLifecycleMode": "protected-full",
   "query_window_seconds": 60,
   "replayer_duration_seconds": 120,
   "query_registration_delay_after_replayer_start_seconds": 10,

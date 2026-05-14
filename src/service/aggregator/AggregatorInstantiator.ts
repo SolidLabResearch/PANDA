@@ -56,6 +56,7 @@ export class AggregatorInstantiator {
     private readonly projectedVariables: string[];
     private readonly aggregationFunction: string;
     private readonly windowWidthMs: number;
+    private readonly resultLifecycleMode: 'rsp-only' | 'protected-full';
     /**
      * Creates an instance of AggregatorInstantiator.
      * @param {string} query - The RSPQL query.
@@ -85,6 +86,7 @@ export class AggregatorInstantiator {
         this.projectedVariables = parsedQuery.projection_variables;
         this.aggregationFunction = parsedQuery.aggregation_function;
         this.windowWidthMs = parsedQuery.s2r[0]?.width ?? 0;
+        this.resultLifecycleMode = process.env.PANDA_BENCHMARK_RESULT_LIFECYCLE_MODE === 'rsp-only' ? 'rsp-only' : 'protected-full';
         parsedQuery.s2r.forEach((stream) => {
             this.stream_array.push(stream.stream_name);
         });
@@ -201,6 +203,8 @@ export class AggregatorInstantiator {
                                 this.auditContext.benchmarkTiming.firstRuleEvalRecorded = true;
                             }
                             const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                            console.log(`[VALIDATION][RULE] raw_rsp_result row_index=${rowIndex} result=${JSON.stringify(reasoned_result)}`);
+                            console.log(`[VALIDATION][RULE] ${inferredAlert ? 'rule_matched' : 'rule_not_matched'} row_index=${rowIndex} source_event_id=${sourceEventUri ?? 'unknown'} numeric_value=${numericSpo2}`);
                             console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                             if (inferredAlert) {
                                 console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
@@ -224,6 +228,7 @@ export class AggregatorInstantiator {
                                 protected_result: protectedResult ?? undefined,
                             };
                             const aggregation_object_string = JSON.stringify(aggregation_object);
+                            console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
                             this.sendToServer(aggregation_object_string);
                             console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                             this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
@@ -246,6 +251,8 @@ export class AggregatorInstantiator {
                         }
                         console.log(`Reasoned Result is ${reasoned_result}`);
                         const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                        console.log(`[VALIDATION][RULE] raw_rsp_result row_index=${rowIndex} result=${JSON.stringify(reasoned_result)}`);
+                        console.log(`[VALIDATION][RULE] ${inferredAlert ? 'rule_matched' : 'rule_not_matched'} row_index=${rowIndex} source_event_id=${sourceEventUri ?? 'unknown'} numeric_value=${numericSpo2}`);
                         console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                         if (inferredAlert) {
                             console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
@@ -269,6 +276,7 @@ export class AggregatorInstantiator {
                             protected_result: protectedResult ?? undefined,
                         };
                         const aggregation_object_string = JSON.stringify(aggregation_object);
+                        console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
                         this.sendToServer(aggregation_object_string);
                         console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                         this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
@@ -900,6 +908,23 @@ export class AggregatorInstantiator {
             actualValue: input.numericSpo2,
         });
         addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_body_bytes', Buffer.byteLength(body, 'utf8'));
+        if (this.resultLifecycleMode === 'rsp-only') {
+            this.protectedResultWritten = true;
+            console.log(`[VALIDATION][PROTECTED_RESULT] lifecycle_mode=rsp-only benchmark_run_id=${benchmarkRunId} resource_url=${resourceUrl} query_hash=${this.hash_string} source_event_id=${input.sourceEventUri ?? 'unknown'}`);
+            return {
+                enabled: true,
+                resource_url: resourceUrl,
+                status: 'rsp_only_emitted',
+                benchmark_run_id: benchmarkRunId,
+                scenario_id: this.getProtectedResultScenarioId(),
+                rsp_query_hash: this.hash_string,
+                eligibility_reason: eligibility.reason,
+                event_time_span_ms: eligibility.eventTimeSpanMs,
+                rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
+                created_at: createdAtIso,
+                body,
+            };
+        }
         await this.ensureProtectedResultContainerReady(resourceUrl);
         incrementBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_attempts');
         maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'protected_result_write_started_at_ns', true);

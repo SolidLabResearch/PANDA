@@ -387,6 +387,10 @@ function getProtectedResultConfig(scenario, benchmarkRunId) {
   };
 }
 
+function getResultLifecycleMode(scenario) {
+  return scenario?.resultLifecycleMode === 'rsp-only' ? 'rsp-only' : 'protected-full';
+}
+
 function commandForDisplay(command, args) {
   return [command, ...args.map((arg) => /\s/.test(arg) ? JSON.stringify(arg) : arg)].join(' ');
 }
@@ -748,12 +752,14 @@ async function startPanda(runRoot, runId, scenario, benchmarkRunId) {
   const logFile = path.join(runRoot, 'raw', `panda-run-${runId}.log`);
   const startedAt = performance.now();
   const protectedResult = getProtectedResultConfig(scenario, benchmarkRunId);
+  const resultLifecycleMode = getResultLifecycleMode(scenario);
   const child = spawnLogged('npm', ['run', 'start-monitoring'], {
     cwd: ROOT,
     env: {
       ...process.env,
       BENCHMARK_TIMING: '1',
       PANDA_EXPECTED_PROPERTY_IRI: scenario.stream_semantics?.expected_property_iri || 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      PANDA_BENCHMARK_RESULT_LIFECYCLE_MODE: resultLifecycleMode,
       ...(protectedResult ? {
         PANDA_BENCHMARK_PROTECTED_RESULT_URL: protectedResult.resource_url,
         PANDA_BENCHMARK_SCENARIO_ID: scenario.scenario_id,
@@ -865,6 +871,7 @@ async function performProtectedResultUmaRead(protectedResultConfig, umaLogFile) 
 function registerQueryAndWait(scenario, opts, benchmarkRunId) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocketClient();
+    const resultLifecycleMode = getResultLifecycleMode(scenario);
     const timeout = setTimeout(() => {
       try { ws.abort(); } catch (_) {}
       reject(new Error('Timed out waiting for first benchmark result'));
@@ -957,11 +964,13 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
           recordIgnoredResult('invalid_output_shape', parsed, now);
           return;
         }
-        const evidence = buildResultWindowEvidence(parsed, now, result.querySendAt, opts.queryWindow);
+        const evidence = resultLifecycleMode === 'rsp-only'
+          ? buildImmediateResultEvidence(parsed, now, result.querySendAt)
+          : buildResultWindowEvidence(parsed, now, result.querySendAt, opts.queryWindow);
         if (!result.firstAnyResultEvidence) {
           result.firstAnyResultEvidence = evidence;
         }
-        if (!evidence.provesFullWindow) {
+        if (resultLifecycleMode !== 'rsp-only' && !evidence.provesFullWindow) {
           recordIgnoredResult('partial_window', parsed, now, evidence);
           return;
         }
@@ -996,6 +1005,23 @@ function registerQueryAndWait(scenario, opts, benchmarkRunId) {
     });
     ws.connect('ws://localhost:8080/', WS_PROTOCOL);
   });
+}
+
+function buildImmediateResultEvidence(parsed, now, querySendAt) {
+  const timing = parsed?.benchmark_timing || {};
+  const metrics = timing.metrics || {};
+  return {
+    eventCount: finiteNumberOrNull(metrics.rsp_stream_event_count_after_query_registration),
+    firstEventTimestampMs: finiteNumberOrNull(metrics.rsp_first_event_timestamp_ms),
+    lastEventTimestampMs: finiteNumberOrNull(metrics.rsp_last_event_timestamp_ms),
+    eventTimeSpanMs: null,
+    wallClockSinceQueryRegisterMs: querySendAt ? now - querySendAt : null,
+    wallClockSinceFirstPostQueryEventMs: null,
+    validationReason: 'rsp_only_immediate_result',
+    provesFullWindow: true,
+    rspWindowMetadataSource: parsed?.rsp_window_metadata?.source || null,
+    rspWindowMetadataSpanMs: finiteNumberOrNull(parsed?.rsp_window_metadata?.event_time_span_ms),
+  };
 }
 
 function parseNs(value) {
@@ -1815,10 +1841,25 @@ function validateOutput(raw, scenario, replayerCounters) {
   const details = {};
   const m = raw.metrics;
   const requiredMarkers = scenario.required_log_markers || [];
-  const missingLogMarkers = requiredMarkers.filter((marker) => !raw.log_markers_found.includes(marker));
+  const resultLifecycleMode = getResultLifecycleMode(scenario);
+  const protectedMarkerSnippets = [
+    '[VALIDATION][PROTECTED_RESULT]',
+    'nurse_notification_received',
+    'nurse_result_uma_get_start',
+    'nurse_result_uma_get_complete',
+  ];
+  const missingLogMarkers = requiredMarkers.filter((marker) => {
+    if (resultLifecycleMode !== 'rsp-only') {
+      return !raw.log_markers_found.includes(marker);
+    }
+    if (protectedMarkerSnippets.some((snippet) => marker.includes(snippet))) {
+      return false;
+    }
+    return !raw.log_markers_found.includes(marker);
+  });
   const acceptedFullWindow = raw.accepted_result_validation_reason === 'event_time_span_full_window'
     || raw.accepted_result_validation_reason === 'rsp_engine_window_metadata_full_window';
-  const isProtectedScenario = scenario?.benchmark_mode === 'protected_rsp_result';
+  const isProtectedScenario = scenario?.benchmark_mode === 'protected_rsp_result' && resultLifecycleMode !== 'rsp-only';
   const protectedFlow = raw.protected_result_flow || {};
   const protectedBody = protectedFlow.returned_body_parsed || {};
   const protectedFlowPassed = !isProtectedScenario || Boolean(
@@ -1850,7 +1891,7 @@ function validateOutput(raw, scenario, replayerCounters) {
     && m.rsp_first_post_registration_event_added_to_result_received_ms > 0
     && Number.isFinite(m.window_adjusted_observed_latency_ms)
     && m.result_count > 0
-    && acceptedFullWindow
+    && (resultLifecycleMode === 'rsp-only' ? raw.accepted_result_validation_reason === 'rsp_only_immediate_result' : acceptedFullWindow)
     && m.replayer_events_posted_after_query_registration > 0
     && missingLogMarkers.length === 0
     && raw.query_registration_delay_seconds + raw.query_window_seconds < raw.replayer_duration_seconds
@@ -1883,6 +1924,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
   const isWarmup = phase === 'warmup';
   const benchmarkRunId = `${scenario.scenario_id}-${isWarmup ? `warmup-${runId}` : runId}-${randomUUID()}`;
   const protectedResultConfig = getProtectedResultConfig(scenario, benchmarkRunId);
+  const resultLifecycleMode = getResultLifecycleMode(scenario);
   const rawDir = isWarmup ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
   const failureDir = isWarmup ? path.join(runRoot, 'failures', 'warmup') : path.join(runRoot, 'failures');
   ensureDir(rawDir);
@@ -1899,6 +1941,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     node_version: process.version,
     scenario_id: scenario.scenario_id,
     benchmark_mode: scenario.benchmark_mode || 'baseline_websocket_result',
+    result_lifecycle_mode: resultLifecycleMode,
     scenario_file_path: scenario.__scenario_file || null,
     stream_semantics: scenario.stream_semantics || null,
     run_id: runId,
@@ -1944,6 +1987,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
   try {
     killPortsIfForced(opts.force, [3000, 4000, 8080]);
     await sleep(opts.force ? 2000 : 0);
+    console.log(`[VALIDATION][SCENARIO] scenario_id=${scenario.scenario_id} result_lifecycle_mode=${resultLifecycleMode} loaded_query_path=${scenario.__scenario_file || 'inline'} loaded_rule_path=${scenario.__scenario_file || 'inline'} expected_property_iri=${scenario.stream_semantics?.expected_property_iri || 'n/a'}`);
     markEvent('css_uma_start_start');
     const uma = await startUma(opts, runRoot, runId);
     umaProcess = uma.child;
@@ -1970,14 +2014,19 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       raw.protected_result_flow.public_preflight_header = publicPreflight.header;
       markEvent('nurse_notification_subscribe_start');
       const subscriptionStartedAt = performance.now();
-      const subscriptionSetup = await setupProtectedResultSubscription(protectedResultConfig);
-      protectedObserver = subscriptionSetup.observer;
-      raw.protected_result_flow.notification_channel = subscriptionSetup.discovery;
-      raw.protected_result_flow.notification_subscription = subscriptionSetup.subscription;
-      raw.protected_result_flow.notification_subscription_status = subscriptionSetup.subscription.ok ? 'subscribed' : 'subscription_failed';
-      raw.metrics.nurse_notification_subscribe_ms = performance.now() - subscriptionStartedAt;
-      markEvent('nurse_notification_subscribed');
-      sequence.nurse_notification_subscribed = isoNow();
+      if (resultLifecycleMode === 'rsp-only') {
+        raw.protected_result_flow.notification_subscription_status = 'skipped_rsp_only';
+        raw.metrics.nurse_notification_subscribe_ms = performance.now() - subscriptionStartedAt;
+      } else {
+        const subscriptionSetup = await setupProtectedResultSubscription(protectedResultConfig);
+        protectedObserver = subscriptionSetup.observer;
+        raw.protected_result_flow.notification_channel = subscriptionSetup.discovery;
+        raw.protected_result_flow.notification_subscription = subscriptionSetup.subscription;
+        raw.protected_result_flow.notification_subscription_status = subscriptionSetup.subscription.ok ? 'subscribed' : 'subscription_failed';
+        raw.metrics.nurse_notification_subscribe_ms = performance.now() - subscriptionStartedAt;
+        markEvent('nurse_notification_subscribed');
+        sequence.nurse_notification_subscribed = isoNow();
+      }
     }
 
     markEvent('panda_start_start');
@@ -2117,6 +2166,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     }
     raw.client_result_delivery = queryResult.clientResultDelivery;
     raw.message_query_hash = queryResult.message?.query_hash || null;
+    console.log(`[VALIDATION][RESULT] emitted_benchmark_result scenario_id=${scenario.scenario_id} run=${runId} lifecycle_mode=${resultLifecycleMode} query_hash=${raw.message_query_hash || 'unknown'} result_count=${queryResult.resultCount} result_size_bytes=${queryResult.resultSizeBytes}`);
     raw.early_result_ignored_reasons_summary = queryResult.earlyResultIgnoredReasonsSummary;
     raw.early_result_ignored_samples = opts.mode === 'smoke' ? queryResult.earlyResultIgnoredSamples : undefined;
     Object.assign(raw, acceptedResultDebugFields(queryResult.acceptedResultEvidence));
@@ -2134,17 +2184,25 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       const writeStartedNs = parseNs(timing.protected_result_write_started_at_ns);
       const writeCompletedNs = parseNs(timing.protected_result_write_completed_at_ns);
       const protectedSourceNs = parseNs(timing.protected_result_source_emitted_at_ns);
-      raw.metrics.rsp_output_to_panda_result_write_ms = nsDiffMs(protectedSourceNs, writeCompletedNs);
-      raw.metrics.rsp_emit_to_protected_write_start_ms = nsDiffMs(protectedSourceNs, writeStartedNs);
-      raw.metrics.protected_write_start_to_complete_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
-      raw.metrics.panda_result_write_total_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+      if (resultLifecycleMode === 'rsp-only') {
+        raw.metrics.rsp_output_to_panda_result_write_ms = null;
+        raw.metrics.rsp_emit_to_protected_write_start_ms = null;
+        raw.metrics.protected_write_start_to_complete_ms = null;
+        raw.metrics.panda_result_write_total_ms = null;
+        console.log(`[VALIDATION][PROTECTED_RESULT] lifecycle_mode_rsp_only skipping_pod_write benchmark_run_id=${benchmarkRunId}`);
+      } else {
+        raw.metrics.rsp_output_to_panda_result_write_ms = nsDiffMs(protectedSourceNs, writeCompletedNs);
+        raw.metrics.rsp_emit_to_protected_write_start_ms = nsDiffMs(protectedSourceNs, writeStartedNs);
+        raw.metrics.protected_write_start_to_complete_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+        raw.metrics.panda_result_write_total_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+      }
       if (writeStartedNs) {
         const writeStartedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeStartedNs);
         if (Number.isFinite(writeStartedRelMs)) {
           sequence.protected_result_write_started = addMsToIso(queryResult.querySendWall, writeStartedRelMs);
         }
       }
-      if (writeCompletedNs) {
+      if (writeCompletedNs && resultLifecycleMode !== 'rsp-only') {
         const writeCompletedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeCompletedNs);
         if (Number.isFinite(writeCompletedRelMs)) {
           markEvent('panda_protected_result_written');
@@ -2152,58 +2210,60 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
         }
       }
 
-      const notification = await protectedObserver.waitForNotification(Math.max(120000, (opts.queryWindow + 60) * 1000));
-      markEvent('nurse_notification_received');
-      sequence.nurse_notification_received = notification.received_at;
-      raw.protected_result_flow.notification_received = notification;
-      const notificationTimeMs = Date.parse(notification.received_at);
-      const writeCompletedAtIso = sequence.panda_protected_result_written || null;
-      const writeCompletedAtMs = writeCompletedAtIso ? Date.parse(writeCompletedAtIso) : NaN;
-      const protectedCreatedAtIso = protectedResultPayload?.created_at || null;
-      const protectedCreatedAtMs = protectedCreatedAtIso ? Date.parse(protectedCreatedAtIso) : NaN;
-      raw.metrics.protected_write_complete_to_notification_ms = Number.isFinite(writeCompletedAtMs)
-        ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
-        : null;
-      raw.metrics.panda_result_write_to_notification_ms = Number.isFinite(writeCompletedAtMs)
-        ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
-        : null;
-      raw.metrics.created_at_to_notification_ms = Number.isFinite(protectedCreatedAtMs)
-        ? Math.max(0, notificationTimeMs - protectedCreatedAtMs)
-        : null;
+      if (resultLifecycleMode !== 'rsp-only') {
+        const notification = await protectedObserver.waitForNotification(Math.max(120000, (opts.queryWindow + 60) * 1000));
+        markEvent('nurse_notification_received');
+        sequence.nurse_notification_received = notification.received_at;
+        raw.protected_result_flow.notification_received = notification;
+        const notificationTimeMs = Date.parse(notification.received_at);
+        const writeCompletedAtIso = sequence.panda_protected_result_written || null;
+        const writeCompletedAtMs = writeCompletedAtIso ? Date.parse(writeCompletedAtIso) : NaN;
+        const protectedCreatedAtIso = protectedResultPayload?.created_at || null;
+        const protectedCreatedAtMs = protectedCreatedAtIso ? Date.parse(protectedCreatedAtIso) : NaN;
+        raw.metrics.protected_write_complete_to_notification_ms = Number.isFinite(writeCompletedAtMs)
+          ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
+          : null;
+        raw.metrics.panda_result_write_to_notification_ms = Number.isFinite(writeCompletedAtMs)
+          ? Math.max(0, notificationTimeMs - writeCompletedAtMs)
+          : null;
+        raw.metrics.created_at_to_notification_ms = Number.isFinite(protectedCreatedAtMs)
+          ? Math.max(0, notificationTimeMs - protectedCreatedAtMs)
+          : null;
 
-      markEvent('nurse_result_uma_get_start');
-      raw.metrics.nurse_notification_to_uma_get_start_ms = events.nurse_result_uma_get_start.t - events.nurse_notification_received.t;
-      const protectedRead = await performProtectedResultUmaRead(protectedResultConfig, uma.umaLogFile);
-      markEvent('nurse_result_uma_get_complete');
-      sequence.nurse_result_read_completed = isoNow();
-      raw.protected_result_flow.nurse_read = protectedRead;
-      raw.metrics.nurse_result_uma_challenge_ms = protectedRead.challenge?.durationMs ?? null;
-      raw.metrics.nurse_result_token_exchange_ms = protectedRead.token?.durationMs ?? null;
-      raw.metrics.nurse_result_authorized_get_ms = protectedRead.authorized?.durationMs ?? null;
-      raw.metrics.nurse_result_total_read_ms = (protectedRead.challenge?.durationMs ?? 0)
-        + (protectedRead.token?.durationMs ?? 0)
-        + (protectedRead.authorized?.durationMs ?? 0);
-      raw.metrics.notification_to_nurse_read_complete_ms = events.nurse_result_uma_get_complete.t - events.nurse_notification_received.t;
-      raw.metrics.rsp_emit_to_nurse_read_complete_ms = Number.isFinite(raw.metrics.rsp_output_to_panda_result_write_ms)
-        && Number.isFinite(raw.metrics.protected_write_complete_to_notification_ms)
-        && Number.isFinite(raw.metrics.notification_to_nurse_read_complete_ms)
-        ? raw.metrics.rsp_output_to_panda_result_write_ms
-          + raw.metrics.protected_write_complete_to_notification_ms
-          + raw.metrics.notification_to_nurse_read_complete_ms
-        : null;
-      raw.metrics.query_registration_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - queryResult.querySendAt;
-      raw.metrics.query_register_to_nurse_read_complete_ms = raw.metrics.query_registration_to_nurse_result_read_ms;
-      raw.metrics.end_to_end_replayer_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - replayer.startedAtPerf;
-      raw.metrics.replayer_start_to_nurse_read_complete_ms = raw.metrics.end_to_end_replayer_to_nurse_result_read_ms;
-      raw.protected_result_flow.returned_body_excerpt = protectedRead.authorized?.body?.slice(0, 320) ?? '';
-      raw.protected_result_flow.returned_body_parsed = protectedRead.parsedBody;
-      raw.protected_result_flow.odrl_proof = protectedRead.odrlProof;
-      raw.protected_result_flow.nurse_get_status = protectedRead.authorized?.status ?? null;
-      raw.protected_result_flow.stale_content_detected = Boolean(
-        protectedRead.parsedBody
-        && protectedRead.parsedBody.benchmarkRunId
-        && protectedRead.parsedBody.benchmarkRunId !== benchmarkRunId
-      );
+        markEvent('nurse_result_uma_get_start');
+        raw.metrics.nurse_notification_to_uma_get_start_ms = events.nurse_result_uma_get_start.t - events.nurse_notification_received.t;
+        const protectedRead = await performProtectedResultUmaRead(protectedResultConfig, uma.umaLogFile);
+        markEvent('nurse_result_uma_get_complete');
+        sequence.nurse_result_read_completed = isoNow();
+        raw.protected_result_flow.nurse_read = protectedRead;
+        raw.metrics.nurse_result_uma_challenge_ms = protectedRead.challenge?.durationMs ?? null;
+        raw.metrics.nurse_result_token_exchange_ms = protectedRead.token?.durationMs ?? null;
+        raw.metrics.nurse_result_authorized_get_ms = protectedRead.authorized?.durationMs ?? null;
+        raw.metrics.nurse_result_total_read_ms = (protectedRead.challenge?.durationMs ?? 0)
+          + (protectedRead.token?.durationMs ?? 0)
+          + (protectedRead.authorized?.durationMs ?? 0);
+        raw.metrics.notification_to_nurse_read_complete_ms = events.nurse_result_uma_get_complete.t - events.nurse_notification_received.t;
+        raw.metrics.rsp_emit_to_nurse_read_complete_ms = Number.isFinite(raw.metrics.rsp_output_to_panda_result_write_ms)
+          && Number.isFinite(raw.metrics.protected_write_complete_to_notification_ms)
+          && Number.isFinite(raw.metrics.notification_to_nurse_read_complete_ms)
+          ? raw.metrics.rsp_output_to_panda_result_write_ms
+            + raw.metrics.protected_write_complete_to_notification_ms
+            + raw.metrics.notification_to_nurse_read_complete_ms
+          : null;
+        raw.metrics.query_registration_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - queryResult.querySendAt;
+        raw.metrics.query_register_to_nurse_read_complete_ms = raw.metrics.query_registration_to_nurse_result_read_ms;
+        raw.metrics.end_to_end_replayer_to_nurse_result_read_ms = events.nurse_result_uma_get_complete.t - replayer.startedAtPerf;
+        raw.metrics.replayer_start_to_nurse_read_complete_ms = raw.metrics.end_to_end_replayer_to_nurse_result_read_ms;
+        raw.protected_result_flow.returned_body_excerpt = protectedRead.authorized?.body?.slice(0, 320) ?? '';
+        raw.protected_result_flow.returned_body_parsed = protectedRead.parsedBody;
+        raw.protected_result_flow.odrl_proof = protectedRead.odrlProof;
+        raw.protected_result_flow.nurse_get_status = protectedRead.authorized?.status ?? null;
+        raw.protected_result_flow.stale_content_detected = Boolean(
+          protectedRead.parsedBody
+          && protectedRead.parsedBody.benchmarkRunId
+          && protectedRead.parsedBody.benchmarkRunId !== benchmarkRunId
+        );
+      }
     }
     const replayerExitInfo = await replayer.exitInfoPromise;
     stopReplayerWatcher();

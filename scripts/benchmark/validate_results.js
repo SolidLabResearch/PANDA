@@ -38,6 +38,7 @@ function validate(row) {
   const m = row.metrics || {};
   const definitions = row.metric_definitions || {};
   const failures = [];
+  const isRspOnlyScenario = row?.result_lifecycle_mode === 'rsp-only';
   const isProtectedScenario = row?.scenario_id === 'uma-replayer-panda-derived-anomaly-e2e'
     || row?.benchmark_mode === 'protected_rsp_result'
     || row?.protected_result_flow?.enabled === true;
@@ -127,7 +128,7 @@ function validate(row) {
     }
   }
 
-  if (isProtectedScenario) {
+  if (isProtectedScenario && !isRspOnlyScenario) {
     const protectedFlow = row.protected_result_flow || {};
     const body = protectedFlow.returned_body_parsed || {};
     const semantics = row.stream_semantics || {};

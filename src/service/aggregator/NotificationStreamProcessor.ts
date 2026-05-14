@@ -23,6 +23,7 @@ export class NotificationStreamProcessor {
     public stream_name: RDFStream | undefined;
     public event_emitter: any;
     private readonly auditContext?: QueryExecutionAuditContext;
+    private parsedObservationLogCount = 0;
 
     /**
      * Creates an instance of NotificationStreamProcessor.
@@ -118,6 +119,7 @@ export class NotificationStreamProcessor {
         const has_value_predicate = "https://saref.etsi.org/core/hasValue";
         const relates_to_property_predicate = "https://saref.etsi.org/core/relatesToProperty";
         const expected_property_iri = process.env.PANDA_EXPECTED_PROPERTY_IRI;
+        console.log(`[VALIDATION][INGEST] expected_property_iri=${expected_property_iri ?? 'n/a'} stream=${this.ldes_stream}`);
         const eventHandler = async (latest_event: string) => {
             this.auditContext?.onDataAccess?.(this.ldes_stream);
             if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstStreamEventRecorded) {
@@ -174,6 +176,10 @@ export class NotificationStreamProcessor {
             const propertyIri = relatesToPropertyQuad?.object?.value;
             const propertyMatchesExpected = expected_property_iri ? propertyIri === expected_property_iri : 'not_checked';
             console.log(`[VALIDATION][INGEST] extraction event_id=${eventId} hasValue_found=${Boolean(hasValueQuad)} relatesToProperty_found=${Boolean(relatesToPropertyQuad)} property_iri=${propertyIri ?? ''} expected_property_iri=${expected_property_iri ?? ''} property_matches_expected=${propertyMatchesExpected}`);
+            if (this.parsedObservationLogCount < 5) {
+                this.parsedObservationLogCount += 1;
+                console.log(`[VALIDATION][INGEST] parsed_observation index=${this.parsedObservationLogCount} event_id=${eventId} timestamp=${timestamp} property_iri=${propertyIri ?? ''} expected_property_iri=${expected_property_iri ?? ''} has_value=${hasValueQuad?.object?.value ?? ''}`);
+            }
 
             if (Number.isNaN(timestamp_epoch)) {
                 this.logger.warn({}, 'latest_event_invalid_timestamp_skipping_event');
@@ -192,6 +198,7 @@ export class NotificationStreamProcessor {
                 this.logger.info({}, 'latest_event_added_to_rsp_engine');
                 console.log(`[VALIDATION][INGEST] event_added_to_rsp_engine stream=${this.ldes_stream} event_timestamp_epoch=${timestamp_epoch}`);
                 console.log(`[MEASURE][RSP] event_added timestamp=${new Date().toISOString()} event_id=${eventId}`);
+                console.log(`[VALIDATION][RSP] event_added_count total=${this.auditContext?.benchmarkTiming?.serverTiming.metrics?.rsp_event_add_count_total ?? 'n/a'} after_query_registration=${this.auditContext?.benchmarkTiming?.serverTiming.metrics?.rsp_event_add_count_after_query_registration ?? 'n/a'}`);
             } else {
                 console.log(`[VALIDATION][INGEST] skip_stream_add reason=stream_name_undefined event_id=${eventId}`);
             }
