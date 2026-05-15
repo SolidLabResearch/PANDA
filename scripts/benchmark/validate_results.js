@@ -157,6 +157,11 @@ function validate(row) {
     requireCheck(isFiniteNumber(m.end_to_end_replayer_to_nurse_result_read_ms) && m.end_to_end_replayer_to_nurse_result_read_ms > 0, 'end_to_end_replayer_to_nurse_result_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.query_registration_to_nurse_result_read_ms) && m.query_registration_to_nurse_result_read_ms > 0, 'query_registration_to_nurse_result_read_ms must exist and be > 0');
     requireCheck(isFiniteNumber(m.rsp_emit_to_protected_write_start_ms) && m.rsp_emit_to_protected_write_start_ms >= 0, 'rsp_emit_to_protected_write_start_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.query_register_to_rule_match_ms) && m.query_register_to_rule_match_ms >= 0, 'query_register_to_rule_match_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.rule_evaluation_only_ms) && m.rule_evaluation_only_ms >= 0, 'rule_evaluation_only_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.rule_match_to_alert_materialization_start_ms) && m.rule_match_to_alert_materialization_start_ms >= 0, 'rule_match_to_alert_materialization_start_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.alert_materialization_ms) && m.alert_materialization_ms >= 0, 'alert_materialization_ms must exist and be >= 0');
+    requireCheck(isFiniteNumber(m.alert_materialization_to_protected_write_start_ms) && m.alert_materialization_to_protected_write_start_ms >= 0, 'alert_materialization_to_protected_write_start_ms must exist and be >= 0');
     requireCheck(isFiniteNumber(m.protected_write_start_to_complete_ms) && m.protected_write_start_to_complete_ms >= 0, 'protected_write_start_to_complete_ms must exist and be >= 0');
     requireCheck(isFiniteNumber(m.protected_write_complete_to_notification_ms) && m.protected_write_complete_to_notification_ms >= 0, 'protected_write_complete_to_notification_ms must exist and be >= 0');
     requireCheck(isFiniteNumber(m.notification_to_nurse_read_complete_ms) && m.notification_to_nurse_read_complete_ms >= 0, 'notification_to_nurse_read_complete_ms must exist and be >= 0');
@@ -171,10 +176,45 @@ function validate(row) {
     const writeComplete = timelineEvent(row, 'panda_protected_result_written');
     const notification = timelineEvent(row, 'nurse_notification_received');
     const nurseReadComplete = timelineEvent(row, 'nurse_result_uma_get_complete');
+    const ruleEvalStart = timelineEvent(row, 'rule_eval_started');
+    const ruleEvalFinish = timelineEvent(row, 'rule_eval_finished');
+    const ruleMatch = timelineEvent(row, 'rule_match_detected');
+    const alertMatStart = timelineEvent(row, 'alert_materialization_start');
+    const alertMatComplete = timelineEvent(row, 'alert_materialization_complete');
+    const challengeComplete = timelineEvent(row, 'nurse_result_uma_challenge_complete');
+    const tokenStart = timelineEvent(row, 'nurse_result_token_exchange_start');
+    const tokenComplete = timelineEvent(row, 'nurse_result_token_exchange_complete');
+    const authorizedStart = timelineEvent(row, 'nurse_result_authorized_get_start');
+    const authorizedComplete = timelineEvent(row, 'nurse_result_authorized_get_complete');
+    requireCheck(Boolean(ruleEvalStart), 'critical_path_timeline must include rule_eval_started');
+    requireCheck(Boolean(ruleEvalFinish), 'critical_path_timeline must include rule_eval_finished');
+    requireCheck(Boolean(ruleMatch), 'critical_path_timeline must include rule_match_detected');
+    requireCheck(Boolean(alertMatStart), 'critical_path_timeline must include alert_materialization_start');
+    requireCheck(Boolean(alertMatComplete), 'critical_path_timeline must include alert_materialization_complete');
     requireCheck(Boolean(writeStart), 'critical_path_timeline must include protected_result_write_start');
     requireCheck(Boolean(writeComplete), 'critical_path_timeline must include panda_protected_result_written');
     requireCheck(Boolean(notification), 'critical_path_timeline must include nurse_notification_received');
     requireCheck(Boolean(nurseReadComplete), 'critical_path_timeline must include nurse_result_uma_get_complete');
+    requireCheck(Boolean(challengeComplete), 'critical_path_timeline must include nurse_result_uma_challenge_complete');
+    requireCheck(Boolean(tokenStart), 'critical_path_timeline must include nurse_result_token_exchange_start');
+    requireCheck(Boolean(tokenComplete), 'critical_path_timeline must include nurse_result_token_exchange_complete');
+    requireCheck(Boolean(authorizedStart), 'critical_path_timeline must include nurse_result_authorized_get_start');
+    requireCheck(Boolean(authorizedComplete), 'critical_path_timeline must include nurse_result_authorized_get_complete');
+    if (ruleEvalStart && ruleEvalFinish) {
+      requireCheck(ruleEvalStart.t_relative_ms <= ruleEvalFinish.t_relative_ms, 'rule_eval_started must be <= rule_eval_finished');
+    }
+    if (ruleEvalFinish && ruleMatch) {
+      requireCheck(ruleEvalFinish.t_relative_ms <= ruleMatch.t_relative_ms, 'rule_eval_finished must be <= rule_match_detected');
+    }
+    if (ruleMatch && alertMatStart) {
+      requireCheck(ruleMatch.t_relative_ms <= alertMatStart.t_relative_ms, 'rule_match_detected must be <= alert_materialization_start');
+    }
+    if (alertMatStart && alertMatComplete) {
+      requireCheck(alertMatStart.t_relative_ms <= alertMatComplete.t_relative_ms, 'alert_materialization_start must be <= alert_materialization_complete');
+    }
+    if (alertMatComplete && writeStart) {
+      requireCheck(alertMatComplete.t_relative_ms <= writeStart.t_relative_ms, 'alert_materialization_complete must be <= protected_result_write_start');
+    }
     if (writeStart && writeComplete) {
       requireCheck(writeStart.t_relative_ms <= writeComplete.t_relative_ms, 'protected_write_start must be <= protected_write_complete');
     }
@@ -183,6 +223,21 @@ function validate(row) {
     }
     if (notification && nurseReadComplete) {
       requireCheck(notification.t_relative_ms <= nurseReadComplete.t_relative_ms, 'nurse_notification_received must be <= nurse_result_uma_get_complete');
+    }
+    if (challengeComplete && tokenStart) {
+      requireCheck(challengeComplete.t_relative_ms <= tokenStart.t_relative_ms, 'nurse_result_uma_challenge_complete must be <= nurse_result_token_exchange_start');
+    }
+    if (tokenStart && tokenComplete) {
+      requireCheck(tokenStart.t_relative_ms <= tokenComplete.t_relative_ms, 'nurse_result_token_exchange_start must be <= nurse_result_token_exchange_complete');
+    }
+    if (tokenComplete && authorizedStart) {
+      requireCheck(tokenComplete.t_relative_ms <= authorizedStart.t_relative_ms, 'nurse_result_token_exchange_complete must be <= nurse_result_authorized_get_start');
+    }
+    if (authorizedStart && authorizedComplete) {
+      requireCheck(authorizedStart.t_relative_ms <= authorizedComplete.t_relative_ms, 'nurse_result_authorized_get_start must be <= nurse_result_authorized_get_complete');
+    }
+    if (authorizedComplete && nurseReadComplete) {
+      requireCheck(authorizedComplete.t_relative_ms <= nurseReadComplete.t_relative_ms, 'nurse_result_authorized_get_complete must be <= nurse_result_uma_get_complete');
     }
     if (row.mode === 'smoke' && isFiniteNumber(m.rsp_emit_to_nurse_read_complete_ms)) {
       requireCheck(

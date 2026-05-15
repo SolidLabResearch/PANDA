@@ -146,6 +146,7 @@ export class AggregatorInstantiator {
             console.log(`The connection with the server has been established. ${connection.connected}`);
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
                 const resultEmitStartedAt = performance.now();
+                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rsp_callback_entered_at_ns', true);
                 if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstResultEmittedRecorded) {
                     this.auditContext.benchmarkTiming.firstResultEmitStartedAtMs = resultEmitStartedAt;
                     maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_result_emitted_at_ns', true);
@@ -164,9 +165,11 @@ export class AggregatorInstantiator {
                 const window_timestamp_from = normalizedWindow.from;
                 const window_timestamp_to = normalizedWindow.to;
                 console.log(`[VALIDATION][RSP] evaluation_tick processing_time_epoch=${evaluation_now} processing_time_iso=${new Date(evaluation_now).toISOString()} window_start_epoch=${window_timestamp_from} window_start_iso=${new Date(window_timestamp_from).toISOString()} window_end_epoch=${window_timestamp_to} window_end_iso=${new Date(window_timestamp_to).toISOString()}`);
+                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rsp_result_parse_started_at_ns', true);
                 this.debugBindingRowShape(object.bindings);
                 const extractedBindingRows = this.extractBindingRows(object.bindings);
                 const bindingRows = this.reduceBindingRowsForEvaluation(extractedBindingRows);
+                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rsp_result_parse_completed_at_ns', true);
                 console.log(`[VALIDATION][RSP] binding_count=${object.bindings.size}`);
                 console.log(`[VALIDATION][RSP] emitted_row_count=${bindingRows.length}`);
                 for (const [rowIndex, bindingRow] of bindingRows.entries()) {
@@ -203,8 +206,11 @@ export class AggregatorInstantiator {
                             const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
                             console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                             if (inferredAlert) {
+                                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rule_match_detected_at_ns', true);
+                                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'alert_materialization_started_at_ns', true);
                                 console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                                 await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                                maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'alert_materialization_completed_at_ns', true);
                             }
                             this.recordFirstResultEmitDuration();
                             const protectedResult = await this.maybeMaterializeProtectedRspResult({
@@ -248,8 +254,11 @@ export class AggregatorInstantiator {
                         const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
                         console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
                         if (inferredAlert) {
+                            maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'rule_match_detected_at_ns', true);
+                            maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'alert_materialization_started_at_ns', true);
                             console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                             await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                            maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'alert_materialization_completed_at_ns', true);
                         }
                         this.recordFirstResultEmitDuration();
                         const protectedResult = await this.maybeMaterializeProtectedRspResult({

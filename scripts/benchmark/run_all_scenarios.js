@@ -1222,7 +1222,7 @@ function metricDefinitions() {
       end_event: 'client_first_valid_result_received',
       interpretation: 'Client-observed wall-clock duration from sending the live query registration request over WebSocket until the first valid result accepted by the benchmark client.',
       critical_path: true,
-      notes: 'Includes the live RSP window wait. Despite the historical name, the start event is the client query registration send.',
+      notes: 'Legacy metric name retained for compatibility. Includes the live RSP window wait and does not isolate lifecycle sub-steps.',
     },
     rsp_first_post_registration_event_added_to_result_received_ms: {
       unit: 'ms',
@@ -1557,7 +1557,7 @@ function metricDefinitions() {
       end_event: 'panda_protected_result_written',
       interpretation: 'Time from the accepted full-window RSP output becoming eligible for materialization until PANDA completed the protected Solid write.',
       critical_path: true,
-      notes: 'Protected scenario only. Legacy compatibility metric: includes pre-write delay plus write duration; prefer rsp_emit_to_protected_write_start_ms and protected_write_start_to_complete_ms for precise breakdown.',
+      notes: 'Protected scenario only. Legacy compatibility metric: includes pre-write delay plus write duration; prefer explicit lifecycle metrics.',
     },
     rsp_emit_to_protected_write_start_ms: {
       unit: 'ms',
@@ -1585,6 +1585,51 @@ function metricDefinitions() {
       interpretation: 'Time spent on the protected result resource write itself.',
       critical_path: true,
       notes: 'Protected scenario only. Legacy compatibility alias for protected_write_start_to_complete_ms.',
+    },
+    query_register_to_rule_match_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'query_register_start',
+      end_event: 'rule_match_detected',
+      interpretation: 'Time from client query registration send until rule match detection in PANDA.',
+      critical_path: true,
+      notes: 'Protected scenario lifecycle metric.',
+    },
+    rule_evaluation_only_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_eval_started',
+      end_event: 'rule_eval_finished',
+      interpretation: 'Rule engine evaluation duration inside PANDA.',
+      critical_path: true,
+      notes: 'Protected scenario lifecycle metric.',
+    },
+    rule_match_to_alert_materialization_start_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_match_detected',
+      end_event: 'alert_materialization_start',
+      interpretation: 'Gap between rule match detection and alert materialization start.',
+      critical_path: true,
+      notes: 'Protected scenario lifecycle metric.',
+    },
+    alert_materialization_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'alert_materialization_start',
+      end_event: 'alert_materialization_complete',
+      interpretation: 'Duration of alert materialization write path in PANDA.',
+      critical_path: true,
+      notes: 'Protected scenario lifecycle metric.',
+    },
+    alert_materialization_to_protected_write_start_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'alert_materialization_complete',
+      end_event: 'protected_result_write_start',
+      interpretation: 'Gap between alert materialization completion and protected result write start.',
+      critical_path: true,
+      notes: 'Protected scenario lifecycle metric.',
     },
     protected_write_complete_to_notification_ms: {
       unit: 'ms',
@@ -1790,7 +1835,15 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
   const serverRegistered = parseNs(timing.query_registered_at_ns);
   const serverEvents = [
     ['rsp_first_event_after_query_register_added', parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns), 'First server-side stream event added to the RSP engine after query registration.'],
+    ['rsp_callback_entered', parseNs(timing.rsp_callback_entered_at_ns), 'PANDA RSP callback entered for the first post-registration result emission.'],
+    ['rsp_result_parse_start', parseNs(timing.rsp_result_parse_started_at_ns), 'PANDA started parsing/extracting RSP result bindings.'],
+    ['rsp_result_parse_done', parseNs(timing.rsp_result_parse_completed_at_ns), 'PANDA completed parsing/extracting RSP result bindings.'],
     ['rsp_first_any_result_emit_ms', parseNs(timing.first_result_emitted_at_ns), 'First server-side RSP result emission after query registration; may be a partial-window result.'],
+    ['rule_eval_started', parseNs(timing.rule_eval_started_at_ns), 'PANDA started rule evaluation.'],
+    ['rule_eval_finished', parseNs(timing.rule_eval_finished_at_ns), 'PANDA completed rule evaluation.'],
+    ['rule_match_detected', parseNs(timing.rule_match_detected_at_ns), 'PANDA detected a rule match.'],
+    ['alert_materialization_start', parseNs(timing.alert_materialization_started_at_ns), 'PANDA started alert materialization.'],
+    ['alert_materialization_complete', parseNs(timing.alert_materialization_completed_at_ns), 'PANDA completed alert materialization.'],
     ['protected_result_write_start', parseNs(timing.protected_result_write_started_at_ns), 'PANDA started writing the protected Solid result resource.'],
     ['panda_protected_result_written', parseNs(timing.protected_result_write_completed_at_ns), 'PANDA finished writing the protected Solid result resource for the accepted full-window result.'],
     ['server_first_valid_result_sent', parseNs(timing.server_sent_at_ns), 'PANDA WebSocket relay sent the accepted result to the benchmark client.'],
@@ -1806,6 +1859,11 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
   addLocal('nurse_notification_subscribed', 'Benchmark runner registered a Solid notification webhook before the protected result was expected.');
   addLocal('nurse_notification_received', 'Benchmark runner observed the Solid notification for the protected result resource.');
   addLocal('nurse_result_uma_get_start', 'Nurse/caregiver started the UMA-protected GET after notification.');
+  addLocal('nurse_result_uma_challenge_complete', 'Nurse/caregiver UMA challenge response was received.');
+  addLocal('nurse_result_token_exchange_start', 'Nurse/caregiver started UMA token exchange.');
+  addLocal('nurse_result_token_exchange_complete', 'Nurse/caregiver completed UMA token exchange.');
+  addLocal('nurse_result_authorized_get_start', 'Nurse/caregiver started the authorized GET with issued token.');
+  addLocal('nurse_result_authorized_get_complete', 'Nurse/caregiver completed the authorized GET with issued token.');
   addLocal('nurse_result_uma_get_complete', 'Nurse/caregiver completed the authorized GET of the protected result resource.');
   addLocal('replayer_completed', 'Live stream replayer completed after the query result was received.');
   return timeline.sort((a, b) => a.t_relative_ms - b.t_relative_ms);
@@ -1834,6 +1892,10 @@ function validateOutput(raw, scenario, replayerCounters) {
     && protectedBody.rspQueryHash === queryResultHash(raw)
     && protectedFlow.odrl_proof?.passed === true
     && protectedFlow.stale_content_detected !== true
+    && Number.isFinite(m.query_register_to_rule_match_ms) && m.query_register_to_rule_match_ms >= 0
+    && Number.isFinite(m.alert_materialization_ms) && m.alert_materialization_ms >= 0
+    && Number.isFinite(m.protected_write_start_to_complete_ms) && m.protected_write_start_to_complete_ms >= 0
+    && Number.isFinite(m.notification_to_nurse_read_complete_ms) && m.notification_to_nurse_read_complete_ms >= 0
   );
   const passed = Boolean(
     raw.status === 'complete'
@@ -2096,6 +2158,11 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       rsp_emit_to_protected_write_start_ms: null,
       protected_write_start_to_complete_ms: null,
       panda_result_write_total_ms: null,
+      query_register_to_rule_match_ms: null,
+      rule_evaluation_only_ms: null,
+      rule_match_to_alert_materialization_start_ms: null,
+      alert_materialization_ms: null,
+      alert_materialization_to_protected_write_start_ms: null,
       protected_write_complete_to_notification_ms: null,
       panda_result_write_to_notification_ms: null,
       created_at_to_notification_ms: null,
@@ -2134,10 +2201,20 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       const writeStartedNs = parseNs(timing.protected_result_write_started_at_ns);
       const writeCompletedNs = parseNs(timing.protected_result_write_completed_at_ns);
       const protectedSourceNs = parseNs(timing.protected_result_source_emitted_at_ns);
+      const ruleMatchNs = parseNs(timing.rule_match_detected_at_ns);
+      const ruleEvalStartNs = parseNs(timing.rule_eval_started_at_ns);
+      const ruleEvalFinishNs = parseNs(timing.rule_eval_finished_at_ns);
+      const alertMatStartNs = parseNs(timing.alert_materialization_started_at_ns);
+      const alertMatCompleteNs = parseNs(timing.alert_materialization_completed_at_ns);
       raw.metrics.rsp_output_to_panda_result_write_ms = nsDiffMs(protectedSourceNs, writeCompletedNs);
       raw.metrics.rsp_emit_to_protected_write_start_ms = nsDiffMs(protectedSourceNs, writeStartedNs);
       raw.metrics.protected_write_start_to_complete_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
       raw.metrics.panda_result_write_total_ms = nsDiffMs(writeStartedNs, writeCompletedNs);
+      raw.metrics.query_register_to_rule_match_ms = nsDiffMs(parseNs(timing.query_registered_at_ns), ruleMatchNs);
+      raw.metrics.rule_evaluation_only_ms = nsDiffMs(ruleEvalStartNs, ruleEvalFinishNs);
+      raw.metrics.rule_match_to_alert_materialization_start_ms = nsDiffMs(ruleMatchNs, alertMatStartNs);
+      raw.metrics.alert_materialization_ms = nsDiffMs(alertMatStartNs, alertMatCompleteNs);
+      raw.metrics.alert_materialization_to_protected_write_start_ms = nsDiffMs(alertMatCompleteNs, writeStartedNs);
       if (writeStartedNs) {
         const writeStartedRelMs = nsDiffMs(parseNs(timing.query_registered_at_ns), writeStartedNs);
         if (Number.isFinite(writeStartedRelMs)) {
@@ -2174,6 +2251,27 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       markEvent('nurse_result_uma_get_start');
       raw.metrics.nurse_notification_to_uma_get_start_ms = events.nurse_result_uma_get_start.t - events.nurse_notification_received.t;
       const protectedRead = await performProtectedResultUmaRead(protectedResultConfig, uma.umaLogFile);
+      if (Number.isFinite(protectedRead.challenge?.durationMs)) {
+        markEvent('nurse_result_uma_challenge_complete');
+      }
+      if (Number.isFinite(protectedRead.token?.durationMs)) {
+        const challengeDoneAt = events.nurse_result_uma_challenge_complete?.t || events.nurse_result_uma_get_start.t;
+        events.nurse_result_token_exchange_start = {
+          t: challengeDoneAt,
+          timestamp: isoNow(),
+          notes: 'Derived start marker based on measured token exchange duration.',
+        };
+        markEvent('nurse_result_token_exchange_complete');
+      }
+      if (Number.isFinite(protectedRead.authorized?.durationMs)) {
+        const tokenDoneAt = events.nurse_result_token_exchange_complete?.t || events.nurse_result_uma_challenge_complete?.t || events.nurse_result_uma_get_start.t;
+        events.nurse_result_authorized_get_start = {
+          t: tokenDoneAt,
+          timestamp: isoNow(),
+          notes: 'Derived start marker based on measured authorized GET duration.',
+        };
+        markEvent('nurse_result_authorized_get_complete');
+      }
       markEvent('nurse_result_uma_get_complete');
       sequence.nurse_result_read_completed = isoNow();
       raw.protected_result_flow.nurse_read = protectedRead;

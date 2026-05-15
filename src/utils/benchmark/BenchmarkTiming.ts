@@ -28,11 +28,17 @@ export type BenchmarkTimingSnapshot = {
     first_stream_event_added_at_ns?: string;
     rsp_window_evaluated_at_ns?: string;
     first_result_emitted_at_ns?: string;
+    rsp_callback_entered_at_ns?: string;
+    rsp_result_parse_started_at_ns?: string;
+    rsp_result_parse_completed_at_ns?: string;
     protected_result_source_emitted_at_ns?: string;
     protected_result_write_started_at_ns?: string;
     protected_result_write_completed_at_ns?: string;
     rule_eval_started_at_ns?: string;
     rule_eval_finished_at_ns?: string;
+    rule_match_detected_at_ns?: string;
+    alert_materialization_started_at_ns?: string;
+    alert_materialization_completed_at_ns?: string;
     server_sent_at_ns?: string;
     uma?: BenchmarkUmaTiming;
     metrics?: BenchmarkServerMetrics;
@@ -88,11 +94,17 @@ type BenchmarkTimingNsKey =
     | 'first_stream_event_added_at_ns'
     | 'rsp_window_evaluated_at_ns'
     | 'first_result_emitted_at_ns'
+    | 'rsp_callback_entered_at_ns'
+    | 'rsp_result_parse_started_at_ns'
+    | 'rsp_result_parse_completed_at_ns'
     | 'protected_result_source_emitted_at_ns'
     | 'protected_result_write_started_at_ns'
     | 'protected_result_write_completed_at_ns'
     | 'rule_eval_started_at_ns'
     | 'rule_eval_finished_at_ns'
+    | 'rule_match_detected_at_ns'
+    | 'alert_materialization_started_at_ns'
+    | 'alert_materialization_completed_at_ns'
     | 'server_sent_at_ns';
 
 export function isBenchmarkTimingEnabled(): boolean {
