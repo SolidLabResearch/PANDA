@@ -1028,6 +1028,21 @@ function parseNs(value) {
   return typeof value === 'string' && /^\d+$/.test(value) ? BigInt(value) : null;
 }
 
+function parseFirstAcceptedResultTiming(logFile) {
+  if (!logFile || !fs.existsSync(logFile)) return null;
+  const text = fs.readFileSync(logFile, 'utf8');
+  const stages = {};
+  const pattern = /\[VALIDATION\]\[RSP\]\[FIRST_ACCEPTED_RESULT\] stage=([a-z_]+) timestamp_ns=(\d+) elapsed_ms=([0-9.]+)/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    stages[match[1]] = {
+      timestamp_ns: match[2],
+      elapsed_ms: Number(match[3]),
+    };
+  }
+  return Object.keys(stages).length > 0 ? stages : null;
+}
+
 function nsDiffMs(a, b) {
   return a && b ? Number(b - a) / 1_000_000 : null;
 }
@@ -1503,6 +1518,195 @@ function metricDefinitions() {
       critical_path: false,
       notes: 'This is an internal first-result processing duration, not a duration from query registration.',
     },
+    rsp_callback_to_parse_done_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_callback_entered',
+      end_event: 'rsp_result_parse_done',
+      interpretation: 'Time from the first accepted result callback entering to the end of parsing and row normalization.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    rsp_result_parse_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_result_parse_start',
+      end_event: 'rsp_result_parse_done',
+      interpretation: 'Time spent parsing and normalizing the first accepted RSP result payload.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    rule_evaluation_only_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_evaluation_start',
+      end_event: 'rule_evaluation_done',
+      interpretation: 'Time spent evaluating the first accepted result against the rule engine.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    benchmark_result_construction_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'benchmark_result_construction_start',
+      end_event: 'benchmark_result_construction_done',
+      interpretation: 'Time spent constructing the benchmark result payload for the first accepted result.',
+      critical_path: false,
+      notes: 'Includes any accepted-result materialization work performed before the WebSocket send.',
+    },
+    post_rule_source_event_lookup_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'first_accepted_result_source_event_lookup_start',
+      end_event: 'first_accepted_result_source_event_lookup_done',
+      interpretation: 'Time spent resolving the source event identifier for the first accepted result.',
+      critical_path: false,
+      notes: 'Measured on the first accepted result row before rule validation.',
+    },
+    post_rule_numeric_value_extraction_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'first_accepted_result_numeric_extraction_start',
+      end_event: 'first_accepted_result_numeric_extraction_done',
+      interpretation: 'Time spent extracting the numeric value for the first accepted result.',
+      critical_path: false,
+      notes: 'Measured on the first accepted result row before rule validation.',
+    },
+    post_rule_validation_or_classification_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_evaluation_done',
+      end_event: 'post_rule_validation_or_classification_done',
+      interpretation: 'Time spent classifying the reasoner output after rule evaluation finishes.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_raw_result_logging_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_raw_result_logging_start',
+      end_event: 'post_rule_raw_result_logging_done',
+      interpretation: 'Time spent logging the raw RSP result and validation trace for the first accepted result.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_alert_materialization_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_alert_materialization_start',
+      end_event: 'post_rule_alert_materialization_done',
+      interpretation: 'Time spent writing the low-SpO2 alert side effect after rule evaluation.',
+      critical_path: false,
+      notes: 'First accepted result only; only present when the inferred alert path is taken.',
+    },
+    post_rule_protected_metadata_prepare_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_protected_metadata_prepare_start',
+      end_event: 'post_rule_protected_metadata_prepare_done',
+      interpretation: 'Time spent preparing protected-result metadata and eligibility state before protected-result materialization.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_query_hash_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_query_hash_start',
+      end_event: 'post_rule_query_hash_done',
+      interpretation: 'Time spent reading/preparing the query hash for protected-result and benchmark payload assembly.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_protected_result_materialization_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_protected_result_materialization_start',
+      end_event: 'post_rule_protected_result_materialization_done',
+      interpretation: 'Time spent awaiting protected-result materialization for the first accepted result.',
+      critical_path: false,
+      notes: 'Includes any awaited async work inside the protected-result helper.',
+    },
+    post_rule_payload_prepare_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_payload_prepare_start',
+      end_event: 'post_rule_payload_prepare_done',
+      interpretation: 'Time spent assembling the benchmark payload fields before serialization.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_timing_finalize_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_timing_finalize_start',
+      end_event: 'post_rule_timing_finalize_done',
+      interpretation: 'Time spent cloning/finalizing the benchmark timing snapshot for payload emission.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_serialization_or_clone_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_serialization_start',
+      end_event: 'post_rule_serialization_done',
+      interpretation: 'Time spent serializing the final benchmark result payload.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_benchmark_result_logging_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_benchmark_result_logging_start',
+      end_event: 'post_rule_benchmark_result_logging_done',
+      interpretation: 'Time spent logging the final benchmark result emission trace.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_to_websocket_send_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rule_evaluation_done',
+      end_event: 'websocket_result_send_start',
+      interpretation: 'Time from the end of rule evaluation to the start of the WebSocket send for the first accepted result.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    post_rule_logging_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'post_rule_logging_start',
+      end_event: 'post_rule_logging_done',
+      interpretation: 'Aggregate logging time for the first accepted result, including raw RSP and benchmark result logs.',
+      critical_path: false,
+      notes: 'Sum of the raw-result and benchmark-result logging spans.',
+    },
+    post_rule_unaccounted_ms: {
+      unit: 'ms',
+      type: 'derived',
+      start_event: 'rule_evaluation_done',
+      end_event: 'websocket_result_send_start',
+      interpretation: 'Residual time between rule evaluation completion and WebSocket send start after accounting for instrumented post-rule stages.',
+      critical_path: false,
+      notes: 'Useful for finding hidden sync work or uninstrumented awaits.',
+    },
+    websocket_send_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'websocket_result_send_start',
+      end_event: 'websocket_result_send_done',
+      interpretation: 'Time spent handing the first accepted benchmark result to the WebSocket client.',
+      critical_path: false,
+      notes: 'First accepted result only.',
+    },
+    rsp_callback_total_processing_ms: {
+      unit: 'ms',
+      type: 'direct',
+      start_event: 'rsp_callback_entered',
+      end_event: 'websocket_result_send_done',
+      interpretation: 'End-to-end processing inside the first accepted RSP callback until the result is handed off to WebSocket send.',
+      critical_path: false,
+      notes: 'First accepted result only; this is the precise replacement for the coarse first-result processing trace.',
+    },
     result_emit_to_client_receive_ms: {
       unit: 'ms',
       type: 'derived',
@@ -1815,6 +2019,15 @@ function buildCriticalPathTimeline(events, queryResult, timing) {
 
   const serverRegistered = parseNs(timing.query_registered_at_ns);
   const serverEvents = [
+    ['rsp_callback_entered', parseNs(timing.rsp_callback_entered_at_ns), 'First accepted RSP callback entered the server processing path.'],
+    ['rsp_result_parse_start', parseNs(timing.rsp_result_parse_start_at_ns), 'Parsing and row normalization started for the first accepted result.'],
+    ['rsp_result_parse_done', parseNs(timing.rsp_result_parse_done_at_ns), 'Parsing and row normalization finished for the first accepted result.'],
+    ['rule_evaluation_start', parseNs(timing.rule_evaluation_start_at_ns), 'Rule evaluation started for the first accepted result.'],
+    ['rule_evaluation_done', parseNs(timing.rule_evaluation_done_at_ns), 'Rule evaluation finished for the first accepted result.'],
+    ['benchmark_result_construction_start', parseNs(timing.benchmark_result_construction_start_at_ns), 'Benchmark result construction started for the first accepted result.'],
+    ['benchmark_result_construction_done', parseNs(timing.benchmark_result_construction_done_at_ns), 'Benchmark result construction finished for the first accepted result.'],
+    ['websocket_result_send_start', parseNs(timing.websocket_result_send_start_at_ns), 'WebSocket send started for the first accepted result.'],
+    ['websocket_result_send_done', parseNs(timing.websocket_result_send_done_at_ns), 'WebSocket send finished for the first accepted result.'],
     ['rsp_first_event_after_query_register_added', parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns), 'First server-side stream event added to the RSP engine after query registration.'],
     ['rsp_first_any_result_emit_ms', parseNs(timing.first_result_emitted_at_ns), 'First server-side RSP result emission after query registration; may be a partial-window result.'],
     ['protected_result_write_start', parseNs(timing.protected_result_write_started_at_ns), 'PANDA started writing the protected Solid result resource.'],
@@ -2090,12 +2303,24 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     sequence.client_result_received = isoNow();
 
     const timing = queryResult.message?.benchmark_timing || {};
+    const firstAcceptedResultTiming = parseFirstAcceptedResultTiming(panda?.logFile);
+    raw.first_accepted_result_timing = firstAcceptedResultTiming;
     const protectedResultPayload = queryResult.message?.protected_result || null;
     const serverRegistered = parseNs(timing.query_registered_at_ns);
     const serverFirstAdd = parseNs(timing.first_stream_event_added_at_ns || timing.first_stream_event_at_ns);
     const serverSent = parseNs(timing.server_sent_at_ns);
     const serverFirstResult = parseNs(timing.first_result_emitted_at_ns);
     const serverFirstWindowEvaluation = parseNs(timing.rsp_window_evaluated_at_ns);
+    const stageNs = (fieldName, stageName) => parseNs(timing[fieldName]) || parseNs(firstAcceptedResultTiming?.[stageName]?.timestamp_ns);
+    const serverCallbackEntered = stageNs('rsp_callback_entered_at_ns', 'rsp_callback_entered');
+    const serverParseStart = stageNs('rsp_result_parse_start_at_ns', 'rsp_result_parse_start');
+    const serverParseDone = stageNs('rsp_result_parse_done_at_ns', 'rsp_result_parse_done');
+    const serverRuleEvaluationStart = stageNs('rule_evaluation_start_at_ns', 'rule_evaluation_start');
+    const serverRuleEvaluationDone = stageNs('rule_evaluation_done_at_ns', 'rule_evaluation_done');
+    const serverBenchmarkConstructionStart = stageNs('benchmark_result_construction_start_at_ns', 'benchmark_result_construction_start');
+    const serverBenchmarkConstructionDone = stageNs('benchmark_result_construction_done_at_ns', 'benchmark_result_construction_done');
+    const serverWebsocketSendStart = stageNs('websocket_result_send_start_at_ns', 'websocket_result_send_start');
+    const serverWebsocketSendDone = stageNs('websocket_result_send_done_at_ns', 'websocket_result_send_done');
     const metrics = timing.metrics || {};
     const queryToResultMs = queryResult.firstResultAt - queryResult.querySendAt;
     const queryToFirstAddMs = nsDiffMs(serverRegistered, serverFirstAdd);
@@ -2132,6 +2357,27 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
       rsp_first_any_result_emit_ms: nsDiffMs(serverRegistered, serverFirstWindowEvaluation),
       rsp_query_eval_ms: null,
       rsp_first_any_result_emit_processing_ms: metrics.first_result_emit_ms ?? null,
+      rsp_callback_to_parse_done_ms: nsDiffMs(serverCallbackEntered, serverParseDone),
+      rsp_result_parse_ms: nsDiffMs(serverParseStart, serverParseDone),
+      rule_evaluation_only_ms: nsDiffMs(serverRuleEvaluationStart, serverRuleEvaluationDone),
+      benchmark_result_construction_ms: nsDiffMs(serverBenchmarkConstructionStart, serverBenchmarkConstructionDone),
+      post_rule_source_event_lookup_ms: metrics.post_rule_source_event_lookup_ms ?? null,
+      post_rule_numeric_value_extraction_ms: metrics.post_rule_numeric_value_extraction_ms ?? null,
+      post_rule_validation_or_classification_ms: metrics.post_rule_validation_or_classification_ms ?? null,
+      post_rule_raw_result_logging_ms: metrics.post_rule_raw_result_logging_ms ?? null,
+      post_rule_alert_materialization_ms: metrics.post_rule_alert_materialization_ms ?? null,
+      post_rule_protected_metadata_prepare_ms: metrics.post_rule_protected_metadata_prepare_ms ?? null,
+      post_rule_query_hash_ms: metrics.post_rule_query_hash_ms ?? null,
+      post_rule_protected_result_materialization_ms: metrics.post_rule_protected_result_materialization_ms ?? null,
+      post_rule_payload_prepare_ms: metrics.post_rule_payload_prepare_ms ?? null,
+      post_rule_timing_finalize_ms: metrics.post_rule_timing_finalize_ms ?? null,
+      post_rule_serialization_or_clone_ms: metrics.post_rule_serialization_or_clone_ms ?? null,
+      post_rule_benchmark_result_logging_ms: metrics.post_rule_benchmark_result_logging_ms ?? null,
+      post_rule_to_websocket_send_ms: nsDiffMs(serverRuleEvaluationDone, serverWebsocketSendStart),
+      post_rule_logging_ms: metrics.post_rule_logging_ms ?? null,
+      post_rule_unaccounted_ms: metrics.post_rule_unaccounted_ms ?? null,
+      websocket_send_ms: nsDiffMs(serverWebsocketSendStart, serverWebsocketSendDone),
+      rsp_callback_total_processing_ms: nsDiffMs(serverCallbackEntered, serverWebsocketSendDone),
       result_emit_to_client_receive_ms: Number.isFinite(serverRegisteredToServerSentMs) ? Math.max(0, queryToResultMs - serverRegisteredToServerSentMs) : null,
       result_count: queryResult.resultCount,
       result_size_bytes: queryResult.resultSizeBytes,
@@ -2589,6 +2835,15 @@ function printCriticalPathSummary(raw) {
   const interesting = new Set([
     'query_register_start',
     'query_register_ack',
+    'rsp_callback_entered',
+    'rsp_result_parse_start',
+    'rsp_result_parse_done',
+    'rule_evaluation_start',
+    'rule_evaluation_done',
+    'benchmark_result_construction_start',
+    'benchmark_result_construction_done',
+    'websocket_result_send_start',
+    'websocket_result_send_done',
     'rsp_first_event_after_query_register_added',
     'rsp_first_any_result_emit_ms',
     'server_first_valid_result_sent',

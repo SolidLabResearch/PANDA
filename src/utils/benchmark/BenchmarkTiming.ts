@@ -28,6 +28,15 @@ export type BenchmarkTimingSnapshot = {
     first_stream_event_added_at_ns?: string;
     rsp_window_evaluated_at_ns?: string;
     first_result_emitted_at_ns?: string;
+    rsp_callback_entered_at_ns?: string;
+    rsp_result_parse_start_at_ns?: string;
+    rsp_result_parse_done_at_ns?: string;
+    rule_evaluation_start_at_ns?: string;
+    rule_evaluation_done_at_ns?: string;
+    benchmark_result_construction_start_at_ns?: string;
+    benchmark_result_construction_done_at_ns?: string;
+    websocket_result_send_start_at_ns?: string;
+    websocket_result_send_done_at_ns?: string;
     protected_result_source_emitted_at_ns?: string;
     protected_result_write_started_at_ns?: string;
     protected_result_write_completed_at_ns?: string;
@@ -62,6 +71,20 @@ export type BenchmarkServerMetrics = {
     protected_result_write_attempts?: number;
     protected_result_write_body_bytes?: number;
     protected_result_write_status_code?: number;
+    post_rule_source_event_lookup_ms?: number;
+    post_rule_numeric_value_extraction_ms?: number;
+    post_rule_validation_or_classification_ms?: number;
+    post_rule_raw_result_logging_ms?: number;
+    post_rule_logging_ms?: number;
+    post_rule_alert_materialization_ms?: number;
+    post_rule_query_hash_ms?: number;
+    post_rule_protected_metadata_prepare_ms?: number;
+    post_rule_protected_result_materialization_ms?: number;
+    post_rule_payload_prepare_ms?: number;
+    post_rule_timing_finalize_ms?: number;
+    post_rule_serialization_or_clone_ms?: number;
+    post_rule_benchmark_result_logging_ms?: number;
+    post_rule_unaccounted_ms?: number;
 };
 
 export type BenchmarkTimingContext = {
@@ -88,6 +111,15 @@ type BenchmarkTimingNsKey =
     | 'first_stream_event_added_at_ns'
     | 'rsp_window_evaluated_at_ns'
     | 'first_result_emitted_at_ns'
+    | 'rsp_callback_entered_at_ns'
+    | 'rsp_result_parse_start_at_ns'
+    | 'rsp_result_parse_done_at_ns'
+    | 'rule_evaluation_start_at_ns'
+    | 'rule_evaluation_done_at_ns'
+    | 'benchmark_result_construction_start_at_ns'
+    | 'benchmark_result_construction_done_at_ns'
+    | 'websocket_result_send_start_at_ns'
+    | 'websocket_result_send_done_at_ns'
     | 'protected_result_source_emitted_at_ns'
     | 'protected_result_write_started_at_ns'
     | 'protected_result_write_completed_at_ns'
@@ -144,6 +176,21 @@ export function maybeMarkBenchmarkNs(
         return;
     }
     context.serverTiming[key] = nowNs().toString();
+}
+
+export function markBenchmarkNs(
+    context: BenchmarkTimingContext | undefined,
+    key: BenchmarkTimingNsKey,
+    timestamp: bigint,
+    onlyFirst = false,
+): void {
+    if (!context?.enabled) {
+        return;
+    }
+    if (onlyFirst && context.serverTiming[key] !== undefined) {
+        return;
+    }
+    context.serverTiming[key] = timestamp.toString();
 }
 
 export function cloneBenchmarkTiming(

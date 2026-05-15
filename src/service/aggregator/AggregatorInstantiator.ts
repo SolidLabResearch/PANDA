@@ -4,7 +4,7 @@ import { performance } from "perf_hooks";
 import { RSPEngine } from "rsp-js";
 import { v4 as uuidv4 } from 'uuid';
 import * as CREDENTIALS from '../../config/PodToken.json';
-import { BenchmarkTimingContext, addBenchmarkMetric, cloneBenchmarkTiming, incrementBenchmarkMetric, maybeMarkBenchmarkNs } from "../../utils/benchmark/BenchmarkTiming";
+import { BenchmarkTimingContext, addBenchmarkMetric, cloneBenchmarkTiming, incrementBenchmarkMetric, markBenchmarkNs, maybeMarkBenchmarkNs, nowNs } from "../../utils/benchmark/BenchmarkTiming";
 import { BindingsWithTimestamp, Credentials, aggregation_object } from "../../utils/Types";
 import { hash_string_md5 } from "../../utils/Util";
 import { parseAuthenticateHeader } from "../authorization/UserManagedAccessFetcher";
@@ -56,6 +56,7 @@ export class AggregatorInstantiator {
     private readonly aggregationFunction: string;
     private readonly windowWidthMs: number;
     private readonly resultLifecycleMode: 'rsp-only' | 'protected-full';
+    private firstAcceptedResultTimingRecorded = false;
     /**
      * Creates an instance of AggregatorInstantiator.
      * @param {string} query - The RSPQL query.
@@ -147,6 +148,21 @@ export class AggregatorInstantiator {
             console.log(`The connection with the server has been established. ${connection.connected}`);
             this.rsp_emitter.on('RStream', async (object: BindingsWithTimestamp) => {
                 const resultEmitStartedAt = performance.now();
+                const callbackEnteredAtNs = nowNs();
+                const callbackEnteredAtPerfMs = performance.now();
+                const benchmarkTiming = this.auditContext?.benchmarkTiming;
+                const recordPostRuleMetric = (
+                    metric: Parameters<typeof addBenchmarkMetric>[1],
+                    startedAtMs: number,
+                    endedAtMs = performance.now(),
+                ): number => {
+                    if (!benchmarkTiming || this.firstAcceptedResultTimingRecorded) {
+                        return 0;
+                    }
+                    const durationMs = endedAtMs - startedAtMs;
+                    addBenchmarkMetric(benchmarkTiming, metric, durationMs);
+                    return durationMs;
+                };
                 if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstResultEmittedRecorded) {
                     this.auditContext.benchmarkTiming.firstResultEmitStartedAtMs = resultEmitStartedAt;
                     maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'first_result_emitted_at_ns', true);
@@ -165,21 +181,29 @@ export class AggregatorInstantiator {
                 const window_timestamp_from = normalizedWindow.from;
                 const window_timestamp_to = normalizedWindow.to;
                 console.log(`[VALIDATION][RSP] evaluation_tick processing_time_epoch=${evaluation_now} processing_time_iso=${new Date(evaluation_now).toISOString()} window_start_epoch=${window_timestamp_from} window_start_iso=${new Date(window_timestamp_from).toISOString()} window_end_epoch=${window_timestamp_to} window_end_iso=${new Date(window_timestamp_to).toISOString()}`);
+                const parseStartAtNs = nowNs();
                 this.debugBindingRowShape(object.bindings);
                 const extractedBindingRows = this.extractBindingRows(object.bindings);
                 const bindingRows = this.reduceBindingRowsForEvaluation(extractedBindingRows);
+                const parseDoneAtNs = nowNs();
                 console.log(`[VALIDATION][RSP] binding_count=${object.bindings.size}`);
                 console.log(`[VALIDATION][RSP] emitted_row_count=${bindingRows.length}`);
                 for (const [rowIndex, bindingRow] of bindingRows.entries()) {
                     console.log(`[VALIDATION][RSP] query_row_received row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
                     this.debugBindingRowVariables(bindingRow, rowIndex);
+                    const sourceEventLookupStartedAtMs = performance.now();
                     const sourceEventUri = bindingRow['?s'] ?? bindingRow['s'] ?? this.findUriLikeValue(bindingRow);
+                    const sourceEventLookupDoneAtMs = performance.now();
+                    const numericExtractionStartedAtMs = performance.now();
                     const spo2Raw = this.resolveProjectedNumericValue(bindingRow);
                     const numericSpo2 = Number(spo2Raw);
+                    const numericExtractionDoneAtMs = performance.now();
                     if (!Number.isFinite(numericSpo2)) {
                         console.log(`[VALIDATION][RSP] skipped_non_numeric row_index=${rowIndex} row=${JSON.stringify(bindingRow)}`);
                         continue;
                     }
+                    recordPostRuleMetric('post_rule_source_event_lookup_ms', sourceEventLookupStartedAtMs, sourceEventLookupDoneAtMs);
+                    recordPostRuleMetric('post_rule_numeric_value_extraction_ms', numericExtractionStartedAtMs, numericExtractionDoneAtMs);
                     console.log(`[VALIDATION][RSP] extracted_numeric_value spo2Value=${numericSpo2}`);
                     console.log(`[VALIDATION][RSP] extracted_source_event_uri sourceEventUri=${sourceEventUri ?? 'undefined'}`);
                     console.log(`[MEASURE][RULE] evaluation_started timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'}`);
@@ -189,6 +213,7 @@ export class AggregatorInstantiator {
                     const aggregation_event = this.generate_aggregation_event(data, aggregation_event_timestamp, this.stream_array, window_timestamp_from, window_timestamp_to);
                     console.log(`Aggregation Event is ${aggregation_event}`)
                     console.log(`[VALIDATION][RULE] assertions_for_rule_engine row_index=${rowIndex} assertions=${JSON.stringify(aggregation_event)}`);
+                    const ruleEvaluationStartAtNs = nowNs();
                     if (this.rules === '') {
                         const fetched_rules = await this.fetch_rules_from_query(this.query);
                         if (fetched_rules) {
@@ -197,19 +222,54 @@ export class AggregatorInstantiator {
                                 maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_started_at_ns', true);
                             }
                             const reasoned_result = await reasoner.reason(aggregation_event);
+                            const ruleEvaluationDoneAtNs = nowNs();
                             if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
                                 maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_finished_at_ns', true);
                                 this.auditContext.benchmarkTiming.firstRuleEvalRecorded = true;
                             }
+                            const postRuleWindowStartedAtMs = performance.now();
+                            let postRuleMeasuredMs = 0;
+                            const validationOrClassificationStartedAtMs = performance.now();
                             const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                            const validationOrClassificationDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_validation_or_classification_ms', validationOrClassificationStartedAtMs, validationOrClassificationDoneAtMs);
+                            const rawResultLoggingStartedAtMs = performance.now();
                             console.log(`[VALIDATION][RULE] raw_rsp_result row_index=${rowIndex} result=${JSON.stringify(reasoned_result)}`);
                             console.log(`[VALIDATION][RULE] ${inferredAlert ? 'rule_matched' : 'rule_not_matched'} row_index=${rowIndex} source_event_id=${sourceEventUri ?? 'unknown'} numeric_value=${numericSpo2}`);
                             console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
+                            const rawResultLoggingDoneAtMs = performance.now();
+                            const rawResultLoggingMs = recordPostRuleMetric('post_rule_raw_result_logging_ms', rawResultLoggingStartedAtMs, rawResultLoggingDoneAtMs);
+                            postRuleMeasuredMs += rawResultLoggingMs;
+                            if (this.resultLifecycleMode === 'rsp-only') {
+                                this.emitRspOnlyBenchmarkResult({
+                                    callbackEnteredAtNs,
+                                    callbackEnteredAtPerfMs,
+                                    parseStartAtNs,
+                                    parseDoneAtNs,
+                                    ruleEvaluationStartAtNs,
+                                    ruleEvaluationDoneAtNs,
+                                    rowIndex,
+                                    sourceEventUri,
+                                    numericSpo2,
+                                    windowTimestampFrom: window_timestamp_from,
+                                    windowTimestampTo: window_timestamp_to,
+                                    normalizedWindowMetadata: normalizedWindow.metadata,
+                                    postRuleWindowStartedAtMs,
+                                    rawResultLoggingMs,
+                                    reasonedResult: reasoned_result,
+                                    aggregationEvent: aggregation_event,
+                                });
+                                return;
+                            }
                             if (inferredAlert) {
+                                const alertMaterializationStartedAtMs = performance.now();
                                 console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                                 await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                                postRuleMeasuredMs += recordPostRuleMetric('post_rule_alert_materialization_ms', alertMaterializationStartedAtMs);
                             }
                             this.recordFirstResultEmitDuration();
+                            const protectedResultMaterializationStartedAtMs = performance.now();
+                            const benchmarkResultConstructionStartAtNs = nowNs();
                             const protectedResult = await this.maybeMaterializeProtectedRspResult({
                                 sourceEventUri,
                                 numericSpo2,
@@ -217,18 +277,67 @@ export class AggregatorInstantiator {
                                 windowTimestampTo: window_timestamp_to,
                                 normalizedWindowMetadata: normalizedWindow.metadata,
                             });
+                            const protectedResultMaterializationDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_protected_result_materialization_ms', protectedResultMaterializationStartedAtMs, protectedResultMaterializationDoneAtMs);
+                            const payloadPrepareStartedAtMs = performance.now();
+                            const queryHashStartedAtMs = performance.now();
+                            const queryHash = this.hash_string;
+                            const queryHashDoneAtMs = performance.now();
+                            recordPostRuleMetric('post_rule_query_hash_ms', queryHashStartedAtMs, queryHashDoneAtMs);
+                            const aggregationEventForPayload = reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event;
+                            const aggregationWindowFrom = new Date(window_timestamp_from);
+                            const aggregationWindowTo = new Date(window_timestamp_to);
+                            const rspWindowMetadata = normalizedWindow.metadata;
+                            const payloadPrepareDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_payload_prepare_ms', payloadPrepareStartedAtMs, payloadPrepareDoneAtMs);
+                            const benchmarkResultLoggingStartedAtMs = performance.now();
+                            console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
+                            const benchmarkResultLoggingDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_benchmark_result_logging_ms', benchmarkResultLoggingStartedAtMs, benchmarkResultLoggingDoneAtMs);
+                            if (benchmarkTiming && !this.firstAcceptedResultTimingRecorded) {
+                                addBenchmarkMetric(benchmarkTiming, 'post_rule_logging_ms', rawResultLoggingMs + (benchmarkResultLoggingDoneAtMs - benchmarkResultLoggingStartedAtMs));
+                                addBenchmarkMetric(benchmarkTiming, 'post_rule_unaccounted_ms', Math.max(0, performance.now() - postRuleWindowStartedAtMs - postRuleMeasuredMs));
+                            }
+                            const benchmarkTimingFinalizeStartedAtMs = performance.now();
+                            const benchmarkTimingSnapshot = cloneBenchmarkTiming(this.auditContext?.benchmarkTiming);
+                            const benchmarkTimingFinalizeDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_timing_finalize_ms', benchmarkTimingFinalizeStartedAtMs, benchmarkTimingFinalizeDoneAtMs);
+                            if (benchmarkTimingSnapshot?.metrics) {
+                                benchmarkTimingSnapshot.metrics.post_rule_timing_finalize_ms = benchmarkTimingFinalizeDoneAtMs - benchmarkTimingFinalizeStartedAtMs;
+                            }
                             const aggregation_object: aggregation_object & { protected_result?: Record<string, any> } = {
-                                query_hash: this.hash_string,
-                                aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
-                                aggregation_window_from: new Date(window_timestamp_from),
-                                aggregation_window_to: new Date(window_timestamp_to),
-                                rsp_window_metadata: normalizedWindow.metadata,
-                                benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
+                                query_hash: queryHash,
+                                aggregation_event: aggregationEventForPayload,
+                                aggregation_window_from: aggregationWindowFrom,
+                                aggregation_window_to: aggregationWindowTo,
+                                rsp_window_metadata: rspWindowMetadata,
+                                benchmark_timing: benchmarkTimingSnapshot,
                                 protected_result: protectedResult ?? undefined,
                             };
+                            const serializationStartedAtMs = performance.now();
                             const aggregation_object_string = JSON.stringify(aggregation_object);
-                            console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
+                            const serializationDoneAtMs = performance.now();
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_serialization_or_clone_ms', serializationStartedAtMs, serializationDoneAtMs);
+                            const benchmarkResultConstructionDoneAtNs = nowNs();
+                            const websocketResultSendStartAtNs = nowNs();
                             this.sendToServer(aggregation_object_string);
+                            const websocketResultSendDoneAtNs = nowNs();
+                            this.recordFirstAcceptedResultTiming({
+                                callbackEnteredAtNs,
+                                callbackEnteredAtPerfMs,
+                                parseStartAtNs,
+                                parseDoneAtNs,
+                                ruleEvaluationStartAtNs,
+                                ruleEvaluationDoneAtNs,
+                                benchmarkResultConstructionStartAtNs,
+                                benchmarkResultConstructionDoneAtNs,
+                                websocketResultSendStartAtNs,
+                                websocketResultSendDoneAtNs,
+                                accepted: Boolean(protectedResult && (protectedResult.status === 'written' || protectedResult.status === 'rsp_only_emitted')),
+                                rowIndex,
+                                sourceEventUri,
+                                numericSpo2,
+                            });
                             console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                             this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                         }
@@ -244,20 +353,55 @@ export class AggregatorInstantiator {
                             maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_started_at_ns', true);
                         }
                         const reasoned_result = await reasoner.reason(aggregation_event);
+                        const ruleEvaluationDoneAtNs = nowNs();
                         if (this.auditContext?.benchmarkTiming && !this.auditContext.benchmarkTiming.firstRuleEvalRecorded) {
                             maybeMarkBenchmarkNs(this.auditContext.benchmarkTiming, 'rule_eval_finished_at_ns', true);
                             this.auditContext.benchmarkTiming.firstRuleEvalRecorded = true;
                         }
-                        console.log(`Reasoned Result is ${reasoned_result}`);
+                        const postRuleWindowStartedAtMs = performance.now();
+                        let postRuleMeasuredMs = 0;
+                        const validationOrClassificationStartedAtMs = performance.now();
                         const inferredAlert = this.reasonerOutputContainsAlert(reasoned_result);
+                        const validationOrClassificationDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_validation_or_classification_ms', validationOrClassificationStartedAtMs, validationOrClassificationDoneAtMs);
+                        const rawResultLoggingStartedAtMs = performance.now();
+                        console.log(`Reasoned Result is ${reasoned_result}`);
                         console.log(`[VALIDATION][RULE] raw_rsp_result row_index=${rowIndex} result=${JSON.stringify(reasoned_result)}`);
                         console.log(`[VALIDATION][RULE] ${inferredAlert ? 'rule_matched' : 'rule_not_matched'} row_index=${rowIndex} source_event_id=${sourceEventUri ?? 'unknown'} numeric_value=${numericSpo2}`);
                         console.log(`[VALIDATION][RULE] inferred_alert_triple_present=${inferredAlert} row_index=${rowIndex}`);
+                        const rawResultLoggingDoneAtMs = performance.now();
+                        const rawResultLoggingMs = recordPostRuleMetric('post_rule_raw_result_logging_ms', rawResultLoggingStartedAtMs, rawResultLoggingDoneAtMs);
+                        postRuleMeasuredMs += rawResultLoggingMs;
+                        if (this.resultLifecycleMode === 'rsp-only') {
+                            this.emitRspOnlyBenchmarkResult({
+                                callbackEnteredAtNs,
+                                callbackEnteredAtPerfMs,
+                                parseStartAtNs,
+                                parseDoneAtNs,
+                                ruleEvaluationStartAtNs,
+                                ruleEvaluationDoneAtNs,
+                                rowIndex,
+                                sourceEventUri,
+                                numericSpo2,
+                                windowTimestampFrom: window_timestamp_from,
+                                windowTimestampTo: window_timestamp_to,
+                                normalizedWindowMetadata: normalizedWindow.metadata,
+                                postRuleWindowStartedAtMs,
+                                rawResultLoggingMs,
+                                reasonedResult: reasoned_result,
+                                aggregationEvent: aggregation_event,
+                            });
+                            return;
+                        }
                         if (inferredAlert) {
+                            const alertMaterializationStartedAtMs = performance.now();
                             console.log(`[MEASURE][RULE] matched timestamp=${new Date().toISOString()} event_id=${sourceEventUri ?? 'unknown'} value=${numericSpo2}`);
                             await this.materializeLowSpo2Alert(sourceEventUri, numericSpo2);
+                            postRuleMeasuredMs += recordPostRuleMetric('post_rule_alert_materialization_ms', alertMaterializationStartedAtMs);
                         }
                         this.recordFirstResultEmitDuration();
+                        const protectedResultMaterializationStartedAtMs = performance.now();
+                        const benchmarkResultConstructionStartAtNs = nowNs();
                         const protectedResult = await this.maybeMaterializeProtectedRspResult({
                             sourceEventUri,
                             numericSpo2,
@@ -265,18 +409,67 @@ export class AggregatorInstantiator {
                             windowTimestampTo: window_timestamp_to,
                             normalizedWindowMetadata: normalizedWindow.metadata,
                         });
+                        const protectedResultMaterializationDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_protected_result_materialization_ms', protectedResultMaterializationStartedAtMs, protectedResultMaterializationDoneAtMs);
+                        const payloadPrepareStartedAtMs = performance.now();
+                        const queryHashStartedAtMs = performance.now();
+                        const queryHash = this.hash_string;
+                        const queryHashDoneAtMs = performance.now();
+                        recordPostRuleMetric('post_rule_query_hash_ms', queryHashStartedAtMs, queryHashDoneAtMs);
+                        const aggregationEventForPayload = reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event;
+                        const aggregationWindowFrom = new Date(window_timestamp_from);
+                        const aggregationWindowTo = new Date(window_timestamp_to);
+                        const rspWindowMetadata = normalizedWindow.metadata;
+                        const payloadPrepareDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_payload_prepare_ms', payloadPrepareStartedAtMs, payloadPrepareDoneAtMs);
+                        const benchmarkResultLoggingStartedAtMs = performance.now();
+                        console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
+                        const benchmarkResultLoggingDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_benchmark_result_logging_ms', benchmarkResultLoggingStartedAtMs, benchmarkResultLoggingDoneAtMs);
+                        if (benchmarkTiming && !this.firstAcceptedResultTimingRecorded) {
+                            addBenchmarkMetric(benchmarkTiming, 'post_rule_logging_ms', rawResultLoggingMs + (benchmarkResultLoggingDoneAtMs - benchmarkResultLoggingStartedAtMs));
+                            addBenchmarkMetric(benchmarkTiming, 'post_rule_unaccounted_ms', Math.max(0, performance.now() - postRuleWindowStartedAtMs - postRuleMeasuredMs));
+                        }
+                        const benchmarkTimingFinalizeStartedAtMs = performance.now();
+                        const benchmarkTimingSnapshot = cloneBenchmarkTiming(this.auditContext?.benchmarkTiming);
+                        const benchmarkTimingFinalizeDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_timing_finalize_ms', benchmarkTimingFinalizeStartedAtMs, benchmarkTimingFinalizeDoneAtMs);
+                        if (benchmarkTimingSnapshot?.metrics) {
+                            benchmarkTimingSnapshot.metrics.post_rule_timing_finalize_ms = benchmarkTimingFinalizeDoneAtMs - benchmarkTimingFinalizeStartedAtMs;
+                        }
                         const aggregation_object: aggregation_object & { protected_result?: Record<string, any> } = {
-                            query_hash: this.hash_string,
-                            aggregation_event: reasoned_result.trim().length > 0 ? reasoned_result : aggregation_event,
-                            aggregation_window_from: new Date(window_timestamp_from),
-                            aggregation_window_to: new Date(window_timestamp_to),
-                            rsp_window_metadata: normalizedWindow.metadata,
-                            benchmark_timing: cloneBenchmarkTiming(this.auditContext?.benchmarkTiming),
+                            query_hash: queryHash,
+                            aggregation_event: aggregationEventForPayload,
+                            aggregation_window_from: aggregationWindowFrom,
+                            aggregation_window_to: aggregationWindowTo,
+                            rsp_window_metadata: rspWindowMetadata,
+                            benchmark_timing: benchmarkTimingSnapshot,
                             protected_result: protectedResult ?? undefined,
                         };
+                        const serializationStartedAtMs = performance.now();
                         const aggregation_object_string = JSON.stringify(aggregation_object);
-                        console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${rowIndex} query_hash=${this.hash_string} has_protected_result=${Boolean(protectedResult)}`);
+                        const serializationDoneAtMs = performance.now();
+                        postRuleMeasuredMs += recordPostRuleMetric('post_rule_serialization_or_clone_ms', serializationStartedAtMs, serializationDoneAtMs);
+                        const benchmarkResultConstructionDoneAtNs = nowNs();
+                        const websocketResultSendStartAtNs = nowNs();
                         this.sendToServer(aggregation_object_string);
+                        const websocketResultSendDoneAtNs = nowNs();
+                        this.recordFirstAcceptedResultTiming({
+                            callbackEnteredAtNs,
+                            callbackEnteredAtPerfMs,
+                            parseStartAtNs,
+                            parseDoneAtNs,
+                            ruleEvaluationStartAtNs,
+                            ruleEvaluationDoneAtNs,
+                            benchmarkResultConstructionStartAtNs,
+                            benchmarkResultConstructionDoneAtNs,
+                            websocketResultSendStartAtNs,
+                            websocketResultSendDoneAtNs,
+                            accepted: Boolean(protectedResult && (protectedResult.status === 'written' || protectedResult.status === 'rsp_only_emitted')),
+                            rowIndex,
+                            sourceEventUri,
+                            numericSpo2,
+                        });
                         console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                         this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
                     }
@@ -338,6 +531,153 @@ export class AggregatorInstantiator {
         const startedAt = benchmarkTiming.firstResultEmitStartedAtMs;
         if (startedAt !== undefined) {
             addBenchmarkMetric(benchmarkTiming, 'first_result_emit_ms', performance.now() - startedAt);
+        }
+    }
+
+    private emitRspOnlyBenchmarkResult(input: {
+        callbackEnteredAtNs: bigint;
+        callbackEnteredAtPerfMs: number;
+        parseStartAtNs: bigint;
+        parseDoneAtNs: bigint;
+        ruleEvaluationStartAtNs: bigint;
+        ruleEvaluationDoneAtNs: bigint;
+        rowIndex: number;
+        sourceEventUri?: string;
+        numericSpo2: number;
+        windowTimestampFrom: number;
+        windowTimestampTo: number;
+        normalizedWindowMetadata: { raw_timestamp_from: number | null; raw_timestamp_to: number | null; event_time_span_ms: number | null; source: string };
+        postRuleWindowStartedAtMs: number;
+        rawResultLoggingMs: number;
+        reasonedResult: string;
+        aggregationEvent: string;
+    }): void {
+        const benchmarkTiming = this.auditContext?.benchmarkTiming;
+        const recordPostRuleMetric = (
+            metric: Parameters<typeof addBenchmarkMetric>[1],
+            startedAtMs: number,
+            endedAtMs = performance.now(),
+        ): number => {
+            if (!benchmarkTiming || this.firstAcceptedResultTimingRecorded) {
+                return 0;
+            }
+            const durationMs = endedAtMs - startedAtMs;
+            addBenchmarkMetric(benchmarkTiming, metric, durationMs);
+            return durationMs;
+        };
+        this.recordFirstResultEmitDuration();
+        let postRuleMeasuredMs = 0;
+        const queryHashStartedAtMs = performance.now();
+        const queryHash = this.hash_string;
+        const queryHashDoneAtMs = performance.now();
+        recordPostRuleMetric('post_rule_query_hash_ms', queryHashStartedAtMs, queryHashDoneAtMs);
+        const aggregationEventForPayload = input.reasonedResult.trim().length > 0 ? input.reasonedResult : input.aggregationEvent;
+        const aggregationWindowFrom = new Date(input.windowTimestampFrom);
+        const aggregationWindowTo = new Date(input.windowTimestampTo);
+        const rspWindowMetadata = input.normalizedWindowMetadata;
+        const payloadPrepareStartedAtMs = performance.now();
+        const payloadPrepareDoneAtMs = performance.now();
+        postRuleMeasuredMs += recordPostRuleMetric('post_rule_payload_prepare_ms', payloadPrepareStartedAtMs, payloadPrepareDoneAtMs);
+        const benchmarkResultLoggingStartedAtMs = performance.now();
+        console.log(`[VALIDATION][RESULT] lifecycle_mode=rsp-only skipping_all_materialization_after_rule`);
+        console.log(`[VALIDATION][RESULT] emitted_benchmark_result lifecycle_mode=${this.resultLifecycleMode} row_index=${input.rowIndex} query_hash=${this.hash_string} has_protected_result=false`);
+        const benchmarkResultLoggingDoneAtMs = performance.now();
+        postRuleMeasuredMs += recordPostRuleMetric('post_rule_benchmark_result_logging_ms', benchmarkResultLoggingStartedAtMs, benchmarkResultLoggingDoneAtMs);
+        if (benchmarkTiming && !this.firstAcceptedResultTimingRecorded) {
+            addBenchmarkMetric(benchmarkTiming, 'post_rule_logging_ms', input.rawResultLoggingMs + (benchmarkResultLoggingDoneAtMs - benchmarkResultLoggingStartedAtMs));
+            addBenchmarkMetric(benchmarkTiming, 'post_rule_unaccounted_ms', Math.max(0, performance.now() - input.postRuleWindowStartedAtMs - postRuleMeasuredMs));
+        }
+        const benchmarkTimingFinalizeStartedAtMs = performance.now();
+        const benchmarkTimingSnapshot = cloneBenchmarkTiming(this.auditContext?.benchmarkTiming);
+        const benchmarkTimingFinalizeDoneAtMs = performance.now();
+        postRuleMeasuredMs += recordPostRuleMetric('post_rule_timing_finalize_ms', benchmarkTimingFinalizeStartedAtMs, benchmarkTimingFinalizeDoneAtMs);
+        if (benchmarkTimingSnapshot?.metrics) {
+            benchmarkTimingSnapshot.metrics.post_rule_timing_finalize_ms = benchmarkTimingFinalizeDoneAtMs - benchmarkTimingFinalizeStartedAtMs;
+        }
+        const benchmarkResultConstructionStartAtNs = nowNs();
+        const aggregation_object: aggregation_object = {
+            query_hash: queryHash,
+            aggregation_event: aggregationEventForPayload,
+            aggregation_window_from: aggregationWindowFrom,
+            aggregation_window_to: aggregationWindowTo,
+            rsp_window_metadata: rspWindowMetadata,
+            benchmark_timing: benchmarkTimingSnapshot,
+        };
+        const serializationStartedAtMs = performance.now();
+        const aggregation_object_string = JSON.stringify(aggregation_object);
+        const serializationDoneAtMs = performance.now();
+        postRuleMeasuredMs += recordPostRuleMetric('post_rule_serialization_or_clone_ms', serializationStartedAtMs, serializationDoneAtMs);
+        const benchmarkResultConstructionDoneAtNs = nowNs();
+        const websocketResultSendStartAtNs = nowNs();
+        this.sendToServer(aggregation_object_string);
+        const websocketResultSendDoneAtNs = nowNs();
+        this.recordFirstAcceptedResultTiming({
+            callbackEnteredAtNs: input.callbackEnteredAtNs,
+            callbackEnteredAtPerfMs: input.callbackEnteredAtPerfMs,
+            parseStartAtNs: input.parseStartAtNs,
+            parseDoneAtNs: input.parseDoneAtNs,
+            ruleEvaluationStartAtNs: input.ruleEvaluationStartAtNs,
+            ruleEvaluationDoneAtNs: input.ruleEvaluationDoneAtNs,
+            benchmarkResultConstructionStartAtNs,
+            benchmarkResultConstructionDoneAtNs,
+            websocketResultSendStartAtNs,
+            websocketResultSendDoneAtNs,
+            accepted: true,
+            rowIndex: input.rowIndex,
+            sourceEventUri: input.sourceEventUri,
+            numericSpo2: input.numericSpo2,
+        });
+        console.log('aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
+        this.logger.info({}, 'aggregation_event_sent_to_solid_stream_aggregator_websocket_server');
+    }
+
+    private recordFirstAcceptedResultTiming(input: {
+        callbackEnteredAtNs: bigint;
+        callbackEnteredAtPerfMs: number;
+        parseStartAtNs: bigint;
+        parseDoneAtNs: bigint;
+        ruleEvaluationStartAtNs: bigint;
+        ruleEvaluationDoneAtNs: bigint;
+        benchmarkResultConstructionStartAtNs: bigint;
+        benchmarkResultConstructionDoneAtNs: bigint;
+        websocketResultSendStartAtNs: bigint;
+        websocketResultSendDoneAtNs: bigint;
+        accepted: boolean;
+        rowIndex: number;
+        sourceEventUri?: string;
+        numericSpo2: number;
+    }): void {
+        const benchmarkTiming = this.auditContext?.benchmarkTiming;
+        if (!benchmarkTiming?.enabled || this.firstAcceptedResultTimingRecorded || !input.accepted) {
+            return;
+        }
+
+        this.firstAcceptedResultTimingRecorded = true;
+        markBenchmarkNs(benchmarkTiming, 'rsp_callback_entered_at_ns', input.callbackEnteredAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'rsp_result_parse_start_at_ns', input.parseStartAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'rsp_result_parse_done_at_ns', input.parseDoneAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'rule_evaluation_start_at_ns', input.ruleEvaluationStartAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'rule_evaluation_done_at_ns', input.ruleEvaluationDoneAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'benchmark_result_construction_start_at_ns', input.benchmarkResultConstructionStartAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'benchmark_result_construction_done_at_ns', input.benchmarkResultConstructionDoneAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'websocket_result_send_start_at_ns', input.websocketResultSendStartAtNs, true);
+        markBenchmarkNs(benchmarkTiming, 'websocket_result_send_done_at_ns', input.websocketResultSendDoneAtNs, true);
+
+        const elapsedMs = (start: bigint, end: bigint) => Number(end - start) / 1_000_000;
+        console.log(`[VALIDATION][RSP][FIRST_ACCEPTED_RESULT] row_index=${input.rowIndex} source_event_id=${input.sourceEventUri ?? 'unknown'} numeric_value=${input.numericSpo2} callback_started_perf_ms=${input.callbackEnteredAtPerfMs.toFixed(3)}`);
+        const stages: Array<[string, bigint]> = [
+            ['rsp_callback_entered', input.callbackEnteredAtNs],
+            ['rsp_result_parse_start', input.parseStartAtNs],
+            ['rsp_result_parse_done', input.parseDoneAtNs],
+            ['rule_evaluation_start', input.ruleEvaluationStartAtNs],
+            ['rule_evaluation_done', input.ruleEvaluationDoneAtNs],
+            ['benchmark_result_construction_start', input.benchmarkResultConstructionStartAtNs],
+            ['benchmark_result_construction_done', input.benchmarkResultConstructionDoneAtNs],
+            ['websocket_result_send_start', input.websocketResultSendStartAtNs],
+            ['websocket_result_send_done', input.websocketResultSendDoneAtNs],
+        ];
+        for (const [stage, timestampNs] of stages) {
+            console.log(`[VALIDATION][RSP][FIRST_ACCEPTED_RESULT] stage=${stage} timestamp_ns=${timestampNs.toString()} elapsed_ms=${elapsedMs(input.callbackEnteredAtNs, timestampNs).toFixed(3)}`);
         }
     }
 
@@ -867,6 +1207,8 @@ export class AggregatorInstantiator {
         windowTimestampTo: number;
         normalizedWindowMetadata: { event_time_span_ms: number | null; source: string };
     }): Promise<Record<string, any> | null> {
+        const benchmarkTiming = this.auditContext?.benchmarkTiming;
+        const protectedMetadataPrepareStartedAtMs = performance.now();
         const resourceUrl = this.getProtectedResultUrl();
         if (!resourceUrl) {
             return null;
@@ -881,6 +1223,10 @@ export class AggregatorInstantiator {
 
         const benchmarkRunId = this.auditContext?.benchmarkTiming?.serverTiming?.benchmark_run_id;
         const eligibility = this.evaluateProtectedResultEligibility(input.normalizedWindowMetadata);
+        const protectedMetadataPrepareDoneAtMs = performance.now();
+        if (benchmarkTiming && !this.firstAcceptedResultTimingRecorded) {
+            addBenchmarkMetric(benchmarkTiming, 'post_rule_protected_metadata_prepare_ms', protectedMetadataPrepareDoneAtMs - protectedMetadataPrepareStartedAtMs);
+        }
         if (!benchmarkRunId || !eligibility.eligible) {
             return {
                 enabled: true,
@@ -895,11 +1241,17 @@ export class AggregatorInstantiator {
 
         maybeMarkBenchmarkNs(this.auditContext?.benchmarkTiming, 'protected_result_source_emitted_at_ns', true);
         const createdAtIso = new Date().toISOString();
+        const queryHashStartedAtMs = performance.now();
+        const rspQueryHash = this.hash_string;
+        const queryHashDoneAtMs = performance.now();
+        if (benchmarkTiming && !this.firstAcceptedResultTimingRecorded) {
+            addBenchmarkMetric(benchmarkTiming, 'post_rule_query_hash_ms', queryHashDoneAtMs - queryHashStartedAtMs);
+        }
         const body = this.buildProtectedResultBody({
             benchmarkRunId,
             scenarioId: this.getProtectedResultScenarioId(),
             sourceEventUri: input.sourceEventUri,
-            rspQueryHash: this.hash_string,
+            rspQueryHash,
             rspWindowStartIso: new Date(input.windowTimestampFrom).toISOString(),
             rspWindowEndIso: new Date(input.windowTimestampTo).toISOString(),
             rspResultTimestampIso: createdAtIso,
@@ -909,14 +1261,14 @@ export class AggregatorInstantiator {
         addBenchmarkMetric(this.auditContext?.benchmarkTiming, 'protected_result_write_body_bytes', Buffer.byteLength(body, 'utf8'));
         if (this.resultLifecycleMode === 'rsp-only') {
             this.protectedResultWritten = true;
-            console.log(`[VALIDATION][PROTECTED_RESULT] lifecycle_mode=rsp-only benchmark_run_id=${benchmarkRunId} resource_url=${resourceUrl} query_hash=${this.hash_string} source_event_id=${input.sourceEventUri ?? 'unknown'}`);
+            console.log(`[VALIDATION][PROTECTED_RESULT] lifecycle_mode=rsp-only benchmark_run_id=${benchmarkRunId} resource_url=${resourceUrl} query_hash=${rspQueryHash} source_event_id=${input.sourceEventUri ?? 'unknown'}`);
             return {
                 enabled: true,
                 resource_url: resourceUrl,
                 status: 'rsp_only_emitted',
                 benchmark_run_id: benchmarkRunId,
                 scenario_id: this.getProtectedResultScenarioId(),
-                rsp_query_hash: this.hash_string,
+                rsp_query_hash: rspQueryHash,
                 eligibility_reason: eligibility.reason,
                 event_time_span_ms: eligibility.eventTimeSpanMs,
                 rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
@@ -958,7 +1310,7 @@ export class AggregatorInstantiator {
                 status: response.ok ? 'written' : 'write_failed',
                 benchmark_run_id: benchmarkRunId,
                 scenario_id: this.getProtectedResultScenarioId(),
-                rsp_query_hash: this.hash_string,
+                rsp_query_hash: rspQueryHash,
                 eligibility_reason: eligibility.reason,
                 event_time_span_ms: eligibility.eventTimeSpanMs,
                 rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
@@ -975,7 +1327,7 @@ export class AggregatorInstantiator {
                 status: 'write_error',
                 benchmark_run_id: benchmarkRunId,
                 scenario_id: this.getProtectedResultScenarioId(),
-                rsp_query_hash: this.hash_string,
+                rsp_query_hash: rspQueryHash,
                 eligibility_reason: eligibility.reason,
                 event_time_span_ms: eligibility.eventTimeSpanMs,
                 rsp_window_metadata_span_ms: eligibility.rspWindowMetadataSpanMs,
