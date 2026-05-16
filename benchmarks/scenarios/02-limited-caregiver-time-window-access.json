@@ -1,6 +1,6 @@
 {
   "scenario_id": "limited-caregiver-time-window-access",
-  "description": "Caregiver can read only a fixed replay-time SPO2 derived resource for the configured 10-minute interval, while direct source-stream access remains denied.",
+  "description": "Caregiver can read only a fixed 10-minute heart-rate-from-IBI derived resource, while direct access to the legacy source container remains denied.",
   "expected_decision": "allow-limited",
   "caregiver_actor_webid": "http://localhost:3000/caregiver/profile/card#me",
   "target_css_resources": {
@@ -8,9 +8,11 @@
     "derived_time_window_url": "http://localhost:3000/alice/derived/spo2-last-10-min/",
     "filter_resource_url": "http://localhost:3000/alice/filters/spo2-last-10-min.rq"
   },
+  "expected_property_iri": "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.ibi",
+  "logical_signal": "heart_rate_from_ibi",
   "limited_window": {
-    "start": "2023-02-13T09:27:27.265Z",
-    "end": "2023-02-13T09:37:27.265Z",
+    "start": "2026-05-13T09:04:47.027000Z",
+    "end": "2026-05-13T09:14:47.027Z",
     "duration_ms": 600000
   },
   "policy_meta_file_paths": [

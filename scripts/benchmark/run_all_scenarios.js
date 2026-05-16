@@ -16,6 +16,19 @@ const {
 const ROOT = repoRoot;
 const SCENARIO_DIR = path.join(ROOT, 'benchmarks', 'scenarios');
 const RESULTS_ROOT = path.join(ROOT, 'benchmarks', 'results', 'runs');
+const LIMITED_FIXTURE_SOURCE_DATASET_PATH = '/Users/kushbisen/Code/stream-aggregator-evaluation-mapper/output/heart-rate-from-ibi-2026-05-13T140357-corrected.nt';
+const LIMITED_FIXTURE_PATH = path.join(ROOT, 'benchmarks', 'generated', 'heart-rate-ibi-real-10min.nt');
+const LIMITED_FIXTURE_WINDOW_START = '2026-05-13T09:04:47.027000Z';
+const LIMITED_QUERY_WINDOW_END = '2026-05-13T09:14:47.027Z';
+const LIMITED_FIXTURE_WINDOW_END = '2026-05-13T09:14:48.259Z';
+const LIMITED_WINDOW_DURATION_MS = 600000;
+const LIMITED_FIXTURE_WINDOW_DURATION_MS = 601232;
+const LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT = 2877;
+const LIMITED_FIXTURE_BOUNDED_OBSERVATION_COUNT = 522;
+const LIMITED_FIXTURE_IN_WINDOW_OBSERVATION_COUNT = 521;
+const LIMITED_LOGICAL_SIGNAL = 'heart_rate_from_ibi';
+const LIMITED_PHYSICAL_STREAM_CONTAINER_URL = 'http://localhost:3000/alice/spo2/';
+const DEFAULT_EXPECTED_PROPERTY_IRI = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2';
 const UMA_DIR = resolveRepoPath({
   cliValue: null,
   envVarName: 'UMA_REPO',
@@ -30,8 +43,6 @@ const TIMESTAMP_PREDICATE = 'https://saref.etsi.org/core/hasTimestamp';
 const SAREF_HAS_VALUE = 'https://saref.etsi.org/core/hasValue';
 const SAREF_MEASUREMENT_MADE_BY = 'https://saref.etsi.org/core/measurementMadeBy';
 const SAREF_RELATES_TO_PROPERTY = 'https://saref.etsi.org/core/relatesToProperty';
-const SPO2_PROPERTY = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2';
-const SPO2_MEASUREMENT_DEVICE = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/PANDA.SPO2';
 const LIMITED_DERIVED_METADATA = [
   '@prefix derived: <urn:npm:solid:derived-resources:> .',
   '',
@@ -69,8 +80,8 @@ const LIMITED_SPARQL_FILTER = [
   '  ?s saref:hasTimestamp ?timestamp .',
   '  ?s ?p ?o .',
   '  FILTER(',
-  '    ?timestamp >= "2023-02-13T09:27:27.265Z"^^xsd:dateTime &&',
-  '    ?timestamp <  "2023-02-13T09:37:27.265Z"^^xsd:dateTime',
+  `    ?timestamp >= "${LIMITED_FIXTURE_WINDOW_START}"^^xsd:dateTime &&`,
+  `    ?timestamp <  "${LIMITED_QUERY_WINDOW_END}"^^xsd:dateTime`,
   '  )',
   '}',
   '',
@@ -560,7 +571,7 @@ ${metaPermissions}
 `.trim();
 }
 
-async function startPanda(opts, runRoot, scenarioId, runId, phase, benchmarkControl = {}) {
+async function startPanda(opts, runRoot, scenarioId, runId, phase, benchmarkControl = {}, expectedPropertyIri = DEFAULT_EXPECTED_PROPERTY_IRI) {
   const logDir = phase === 'warmup' ? path.join(runRoot, 'warmup') : path.join(runRoot, 'raw');
   const logFile = path.join(logDir, `panda-run-${runId}.log`);
   const resourceUsageLogFile = opts.collectResourceUsage
@@ -574,7 +585,7 @@ async function startPanda(opts, runRoot, scenarioId, runId, phase, benchmarkCont
     env: {
       ...process.env,
       BENCHMARK_TIMING: '1',
-      PANDA_EXPECTED_PROPERTY_IRI: 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.spo2',
+      PANDA_EXPECTED_PROPERTY_IRI: expectedPropertyIri,
       ...(benchmarkControlEnabled ? {
         PANDA_BENCHMARK_CONTROL_ENABLED: 'true',
         PANDA_BENCHMARK_CONTROL_TOKEN: benchmarkControlToken,
@@ -641,65 +652,101 @@ async function waitForReplayerActive(counters, timeoutMs) {
   throw new Error('Timed out waiting for replayer to actively post stream data');
 }
 
-function makeLimitedScenarioObservations(benchmarkRunId) {
-  return [
-    { suffix: 'before-1', timestamp: '2023-02-13T09:26:27.265Z', value: 95 },
-    { suffix: 'window-1', timestamp: '2023-02-13T09:27:27.265Z', value: 96 },
-    { suffix: 'window-2', timestamp: '2023-02-13T09:30:00.000Z', value: 97 },
-    { suffix: 'window-3', timestamp: '2023-02-13T09:37:27.264Z', value: 98 },
-    { suffix: 'after-boundary', timestamp: '2023-02-13T09:37:27.265Z', value: 99 },
-    { suffix: 'after-1', timestamp: '2023-02-13T09:38:00.000Z', value: 94 },
-  ].map((entry, index) => ({
-    ...entry,
-    url: `http://localhost:3000/alice/spo2/${benchmarkRunId}-${index + 1}-${entry.suffix}`,
-  }));
-}
-
-function makeLimitedProcessingScenarioObservations(scenario, benchmarkRunId) {
-  const windowStartMs = Date.parse(scenario.limited_window.start);
-  const windowEndMs = Date.parse(scenario.limited_window.end);
-  const expectedCount = scenario.expected_in_window_observation_count || 600;
-  const inWindow = [];
-  for (let index = 0; index < expectedCount; index += 1) {
-    const timestampMs = windowStartMs + (index * 1000);
-    if (timestampMs >= windowEndMs) {
-      throw new Error(`Configured deterministic preload would exceed the half-open window at index=${index}`);
-    }
-    inWindow.push({
-      category: 'in_window',
-      suffix: `window-${String(index + 1).padStart(4, '0')}`,
-      timestamp: isoFromTimestampMs(timestampMs),
-      value: 88,
-    });
+function loadRealFixtureObservations(fixturePath, loadWindowStartIso, loadWindowEndIso) {
+  if (!fs.existsSync(fixturePath)) {
+    throw new Error(`Missing bounded fixture at ${fixturePath}`);
   }
-  const outOfWindow = [
-    {
-      category: 'out_of_window',
-      suffix: 'before-boundary',
-      timestamp: isoFromTimestampMs(windowStartMs - 1000),
-      value: 96,
-    },
-    {
-      category: 'out_of_window',
-      suffix: 'after-boundary',
-      timestamp: isoFromTimestampMs(windowEndMs),
-      value: 97,
-    },
-  ];
-  return [...outOfWindow.slice(0, 1), ...inWindow, ...outOfWindow.slice(1)].map((entry, index) => ({
-    ...entry,
-    url: `http://example.org/panda-benchmark/${benchmarkRunId}/spo2/${index + 1}-${entry.suffix}`,
-  }));
+  const fixtureText = fs.readFileSync(fixturePath, 'utf8');
+  const subjectOrder = [];
+  const subjects = new Map();
+  for (const line of fixtureText.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const match = line.match(/^<([^>]+)>\s+<([^>]+)>\s+(.+)\s+\.\s*$/);
+    if (!match) continue;
+    const [, subject, predicate, object] = match;
+    let entry = subjects.get(subject);
+    if (!entry) {
+      entry = {
+        subject,
+        lines: [],
+        timestamp: null,
+        value: null,
+      };
+      subjects.set(subject, entry);
+      subjectOrder.push(subject);
+    }
+    entry.lines.push(line);
+    if (predicate === TIMESTAMP_PREDICATE) {
+      entry.timestamp = object.match(/"([^"]+)"/)?.[1] || null;
+    } else if (predicate === SAREF_HAS_VALUE) {
+      entry.value = object.match(/"([^"]+)"/)?.[1] || null;
+    }
+  }
+  const windowStartMs = Date.parse(loadWindowStartIso);
+  const windowEndMs = Date.parse(loadWindowEndIso);
+  const observations = subjectOrder.map((subject) => {
+    const entry = subjects.get(subject);
+    return {
+      subject,
+      timestamp: entry.timestamp,
+      value: entry.value,
+      payload: `${entry.lines.join('\n')}\n`,
+    };
+  }).filter((entry) => entry.timestamp && Number.isFinite(Date.parse(entry.timestamp)))
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  if (observations.length === 0) {
+    throw new Error(`No observations were loaded from bounded fixture ${fixturePath}`);
+  }
+  for (const observation of observations) {
+    const timestampMs = Date.parse(observation.timestamp);
+    if (timestampMs < windowStartMs || timestampMs >= windowEndMs) {
+      throw new Error(`Bounded fixture observation ${observation.subject} falls outside the configured fixture window`);
+    }
+  }
+  return {
+    observations,
+    sourceObservationCount: LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT,
+    sourceFixtureObservationCount: subjectOrder.length,
+    boundedFixtureObservationCount: observations.length,
+    boundedViewObservationCount: observations.length,
+    boundedFixtureWindowStart: loadWindowStartIso,
+    boundedFixtureWindowEnd: loadWindowEndIso,
+    boundedFixtureDurationMs: windowEndMs - windowStartMs,
+  };
 }
 
-function buildObservationTurtle(memberUrl, value, timestampIso) {
-  return [
-    `<${memberUrl}> <${SAREF_MEASUREMENT_MADE_BY}> <${SPO2_MEASUREMENT_DEVICE}> .`,
-    `<${memberUrl}> <${SAREF_RELATES_TO_PROPERTY}> <${SPO2_PROPERTY}> .`,
-    `<${memberUrl}> <${TIMESTAMP_PREDICATE}> "${timestampIso}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .`,
-    `<${memberUrl}> <${SAREF_HAS_VALUE}> "${value}"^^<http://www.w3.org/2001/XMLSchema#float> .`,
-    '',
-  ].join('\n');
+async function postObservationFixture(fixture, sourceStreamUrl, httpStatuses, phase, windowStartIso, windowEndIso) {
+  const startedAt = performance.now();
+  const windowStartMs = Date.parse(windowStartIso);
+  const windowEndMs = Date.parse(windowEndIso);
+  let inWindowEventsWrittenCount = 0;
+  let outOfWindowEventsWrittenCount = 0;
+  for (const observation of fixture.observations) {
+    const timestampMs = Date.parse(observation.timestamp);
+    if (timestampMs >= windowStartMs && timestampMs < windowEndMs) {
+      inWindowEventsWrittenCount += 1;
+    } else {
+      outOfWindowEventsWrittenCount += 1;
+    }
+    const response = await postWithClaimUma(
+      sourceStreamUrl,
+      observation.payload,
+      ALICE_WEBID,
+      httpStatuses,
+      phase,
+    );
+    if (!(response.status >= 200 && response.status < 300)) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Failed to post real fixture observation ${observation.subject}: status=${response.status} body=${body}`);
+    }
+  }
+  return {
+    preloadMs: performance.now() - startedAt,
+    sourceEventsWrittenCount: fixture.observations.length,
+    inWindowEventsWrittenCount,
+    outOfWindowEventsWrittenCount,
+    expectedDerivedObservationCount: inWindowEventsWrittenCount,
+  };
 }
 
 async function postWithClaimUma(url, body, claimToken, httpStatuses, phase) {
@@ -820,49 +867,6 @@ async function fetchWithClaimUma(url, claimToken, httpStatuses, phase) {
   trace.body = await response.text().catch(() => '');
   trace.totalLatencyMs = performance.now() - startedAt;
   return trace;
-}
-
-function serializeQuads(quads) {
-  return new Promise((resolve, reject) => {
-    const writer = new Writer({ format: 'N-Triples' });
-    writer.addQuads(quads);
-    writer.end((error, result) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(result);
-    });
-  });
-}
-
-async function preloadLimitedProcessingObservations(scenario, benchmarkRunId, sourceStreamUrl, httpStatuses) {
-  const observations = makeLimitedProcessingScenarioObservations(scenario, benchmarkRunId);
-  const startedAt = performance.now();
-  for (const observation of observations) {
-    const response = await postWithClaimUma(
-      sourceStreamUrl,
-      buildObservationTurtle(observation.url, observation.value, observation.timestamp),
-      ALICE_WEBID,
-      httpStatuses,
-      'limited_processing_preload',
-    );
-    if (!(response.status >= 200 && response.status < 300)) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`Failed to preload deterministic SPO2 observation ${observation.url}: status=${response.status} body=${body}`);
-    }
-  }
-  return {
-    observations,
-    preloadMs: performance.now() - startedAt,
-    sourceEventsWrittenCount: observations.length,
-    inWindowEventsWrittenCount: observations.filter((observation) => observation.category === 'in_window').length,
-    outOfWindowEventsWrittenCount: observations.filter((observation) => observation.category === 'out_of_window').length,
-    expectedDerivedObservationCount: observations.filter((observation) => observation.category === 'in_window').length,
-    outOfWindowSubjects: observations
-      .filter((observation) => observation.category === 'out_of_window')
-      .map((observation) => observation.url),
-  };
 }
 
 function parseDerivedObservationPayload(text, windowStartIso, windowEndIso, outOfWindowSubjects = []) {
@@ -1731,7 +1735,7 @@ function metricDefinitions() {
       type: 'direct',
       start_event: 'full_stream_denial_start',
       end_event: 'full_stream_denial_end',
-      interpretation: 'Elapsed caregiver UMA flow latency until denial is established for the full SPO2 stream.',
+      interpretation: 'Elapsed caregiver UMA flow latency until denial is established for the full legacy source stream.',
       critical_path: false,
       notes: 'Scenario specific to limited-caregiver-time-window-access; only present when measured.',
     },
@@ -1767,7 +1771,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'derived_time_window_validation_start',
       end_event: 'derived_time_window_validation_end',
-      interpretation: 'Number of derived-view SPO2 observations returned to the caregiver after timestamp validation.',
+      interpretation: 'Number of derived-view heart-rate-from-IBI observations returned to the caregiver after timestamp validation.',
       critical_path: false,
       notes: 'Scenario metadata for limited-caregiver-time-window-access.',
     },
@@ -1776,7 +1780,7 @@ function metricDefinitions() {
       type: 'direct',
       start_event: 'preload_observations_start',
       end_event: 'preload_observations_end',
-      interpretation: 'Wall-clock duration to preload the deterministic fixed-window SPO2 observations into the source stream.',
+      interpretation: 'Wall-clock duration to post the real 10-minute heart-rate-from-IBI fixture into the legacy source stream.',
       critical_path: false,
       notes: 'Scenario specific to limited-caregiver-time-window-processing.',
     },
@@ -1812,7 +1816,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'derived_processing_bounded_batch_post_start',
       end_event: 'derived_processing_bounded_batch_post_end',
-      interpretation: 'Number of observations PANDA parsed from the bounded derived RDF view.',
+      interpretation: 'Number of heart-rate-from-IBI observations PANDA parsed from the bounded derived RDF view.',
       critical_path: false,
       notes: 'Scenario specific to limited-caregiver-time-window-processing.',
     },
@@ -1857,7 +1861,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'preload_observations_start',
       end_event: 'preload_observations_end',
-      interpretation: 'Number of source SPO2 observations written into the source stream during deterministic preload.',
+      interpretation: 'Number of real fixture observations written into the source stream during bounded fixture load.',
       critical_path: false,
       notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
     },
@@ -1866,7 +1870,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'preload_observations_start',
       end_event: 'preload_observations_end',
-      interpretation: 'Number of deterministic SPO2 observations written inside the configured half-open replay-time interval.',
+      interpretation: 'Number of real fixture observations written inside the configured 10-minute replay-time interval.',
       critical_path: false,
       notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
     },
@@ -1875,7 +1879,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'preload_observations_start',
       end_event: 'preload_observations_end',
-      interpretation: 'Number of deterministic control observations written outside the configured half-open replay-time interval.',
+      interpretation: 'Number of control observations written outside the configured half-open replay-time interval.',
       critical_path: false,
       notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
     },
@@ -1884,7 +1888,7 @@ function metricDefinitions() {
       type: 'counter',
       start_event: 'limited_window_start',
       end_event: 'limited_window_end',
-      interpretation: 'Expected number of in-window observations returned by the derived time-window view.',
+      interpretation: 'Expected number of in-window observations returned by the real derived time-window view.',
       critical_path: false,
       notes: 'Scenario metadata for limited-caregiver-time-window-processing.',
     },
@@ -2070,11 +2074,28 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
     source_events_written_count: 0,
     in_window_events_written_count: 0,
     out_of_window_events_written_count: 0,
-    expected_derived_observation_count: scenario.expected_in_window_observation_count || 600,
+    expected_derived_observation_count: scenario.expected_in_window_observation_count || LIMITED_FIXTURE_IN_WINDOW_OBSERVATION_COUNT,
+    source_dataset_path: LIMITED_FIXTURE_SOURCE_DATASET_PATH,
+    bounded_fixture_path: LIMITED_FIXTURE_PATH,
+    source_fixture_path: LIMITED_FIXTURE_PATH,
+    source_observation_count: LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT,
+    source_fixture_observation_count: 0,
+    bounded_fixture_observation_count: 0,
+    bounded_view_observation_count: 0,
+    out_of_window_observation_count: 0,
+    bounded_fixture_window_start: LIMITED_FIXTURE_WINDOW_START,
+    bounded_fixture_window_end: LIMITED_FIXTURE_WINDOW_END,
+    bounded_fixture_duration_ms: LIMITED_FIXTURE_WINDOW_DURATION_MS,
+    stream_container_reused_for_compatibility: true,
+    logical_signal: LIMITED_LOGICAL_SIGNAL,
+    expected_property_iri: scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI,
+    physical_stream_container_url: LIMITED_PHYSICAL_STREAM_CONTAINER_URL,
     full_stream_publicly_readable: null,
     derived_time_window_resource_publicly_readable: null,
     caregiver_can_access_full_stream: false,
     caregiver_can_access_derived_time_window: false,
+    fake_replayer_used: false,
+    data_source_mode: 'real_fixture_10min',
     derived_time_window_content_returned: false,
     full_stream_content_returned_to_caregiver: false,
     returned_observation_count: 0,
@@ -2126,27 +2147,42 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
     panda = await startPanda(opts, runRoot, scenario.scenario_id, runId, phase, {
       enabled: true,
       token: benchmarkControlToken,
-    });
+    }, scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI);
     markEvent('panda_ready');
     sequence.panda_started = isoNow();
     raw.metrics.panda_startup_ms = panda.ms;
     raw.resource_usage_log_file = panda.resourceUsageLogFile;
 
+    const fixture = loadRealFixtureObservations(
+      LIMITED_FIXTURE_PATH,
+      LIMITED_FIXTURE_WINDOW_START,
+      LIMITED_FIXTURE_WINDOW_END,
+    );
+    raw.source_fixture_observation_count = fixture.sourceFixtureObservationCount;
+    raw.bounded_fixture_observation_count = fixture.boundedFixtureObservationCount;
+    raw.bounded_view_observation_count = fixture.boundedViewObservationCount;
+    raw.out_of_window_observation_count = fixture.sourceFixtureObservationCount - fixture.boundedViewObservationCount;
+    raw.expected_derived_observation_count = fixture.boundedFixtureObservationCount;
+
     markEvent('preload_observations_start');
-    const preload = await preloadLimitedProcessingObservations(
-      scenario,
-      benchmarkRunId,
+    const preload = await postObservationFixture(
+      fixture,
       raw.source_stream_url,
       httpStatuses,
+      'limited_processing_preload',
+      raw.limited_window_start,
+      raw.limited_window_end,
     );
     markEvent('preload_observations_end');
     raw.metrics.preload_observations_ms = preload.preloadMs;
     raw.source_events_written_count = preload.sourceEventsWrittenCount;
     raw.in_window_events_written_count = preload.inWindowEventsWrittenCount;
     raw.out_of_window_events_written_count = preload.outOfWindowEventsWrittenCount;
+    raw.bounded_view_observation_count = preload.inWindowEventsWrittenCount;
+    raw.out_of_window_observation_count = raw.source_fixture_observation_count - preload.inWindowEventsWrittenCount;
     raw.expected_derived_observation_count = preload.expectedDerivedObservationCount;
     raw.replayer_process = {
-      command: 'deterministic_fixed_window_preload_plus_derived_view_injection',
+      command: 'real_fixture_10min_nt_post',
       requested_duration_seconds: 0,
       process_started_at: events.preload_observations_start.timestamp,
       process_exit_at: events.preload_observations_end.timestamp,
@@ -2154,6 +2190,8 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
       exit_signal: null,
       actual_process_runtime_ms: preload.preloadMs,
       observations_posted: preload.sourceEventsWrittenCount,
+      source_dataset_path: LIMITED_FIXTURE_SOURCE_DATASET_PATH,
+      bounded_fixture_path: LIMITED_FIXTURE_PATH,
     };
 
     const publicFullResponse = await fetch(raw.source_stream_url, {
@@ -2300,25 +2338,18 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
     );
     raw.validation_warnings.push({
       code: 'window_adjusted_observed_latency_not_meaningful',
-      message: 'window_adjusted_observed_latency_ms is not recorded for the bounded derived-view processing scenario because the 600 derived observations are ingested faster than wall-clock time.',
+      message: `window_adjusted_observed_latency_ms is not recorded for the bounded derived-view processing scenario because the ${raw.expected_derived_observation_count} real observations are ingested faster than wall-clock time.`,
     });
 
     raw.rsp_result_count = queryResult.resultCount;
     raw.monitoring_result_produced = Boolean(queryResult.message?.aggregation_event);
-    raw.anomaly_result_generated = /SPO2_LOW|alert/i.test(queryResult.message?.aggregation_event || '');
+    raw.anomaly_result_generated = /HEART_RATE_ALERT|alert/i.test(queryResult.message?.aggregation_event || '');
     raw.resource_usage_sample_count = countResourceUsageSamples(raw.resource_usage_log_file);
     raw.critical_path_timeline = buildCriticalPathTimeline(events, queryResult, timing);
     Object.assign(raw, acceptedResultDebugFields(queryResult.acceptedResultEvidence));
     Object.assign(raw, aggregationWindowDebugFields(queryResult.message, 'accepted_result'));
     Object.assign(raw, firstAnyResultDebugFields(queryResult.firstAnyResultEvidence));
     Object.assign(raw, ignoredResultDebugFields(queryResult.lastIgnoredPartialEvidence));
-    if (rspEventCount > raw.expected_derived_observation_count) {
-      raw.validation_warnings.push({
-        code: 'rsp_watermark_control_applied',
-        message: 'A benchmark-only watermark control was applied after the 600 derived observations to close the 600000 ms window without injecting an out-of-window observation.',
-        rsp_stream_event_count_after_query_registration: rspEventCount,
-      });
-    }
 
     raw.scenario_passed = Boolean(
       raw.caregiver_requester_used === true
@@ -2326,9 +2357,20 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
       && raw.derived_time_window_resource_publicly_readable === false
       && raw.caregiver_can_access_full_stream === false
       && raw.caregiver_can_access_derived_time_window === true
-      && raw.source_events_written_count >= 602
-      && raw.in_window_events_written_count === 600
-      && raw.out_of_window_events_written_count >= 2
+      && raw.fake_replayer_used === false
+      && raw.data_source_mode === 'real_fixture_10min'
+      && raw.stream_container_reused_for_compatibility === true
+      && raw.logical_signal === LIMITED_LOGICAL_SIGNAL
+      && raw.expected_property_iri === (scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI)
+      && raw.physical_stream_container_url === LIMITED_PHYSICAL_STREAM_CONTAINER_URL
+      && raw.source_dataset_path === LIMITED_FIXTURE_SOURCE_DATASET_PATH
+      && raw.bounded_fixture_path === LIMITED_FIXTURE_PATH
+      && raw.source_observation_count === LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT
+      && raw.bounded_fixture_observation_count === LIMITED_FIXTURE_BOUNDED_OBSERVATION_COUNT
+      && raw.bounded_fixture_duration_ms > raw.limited_window_duration_ms
+      && raw.source_events_written_count === raw.bounded_fixture_observation_count
+      && raw.in_window_events_written_count === raw.expected_derived_observation_count
+      && raw.out_of_window_events_written_count === (raw.bounded_fixture_observation_count - raw.expected_derived_observation_count)
       && raw.derived_time_window_content_returned === true
       && raw.full_stream_content_returned_to_caregiver === false
       && raw.returned_observation_count === raw.expected_derived_observation_count
@@ -2342,6 +2384,8 @@ async function runLimitedCaregiverTimeWindowProcessingScenario(scenario, opts, r
       && Number.isFinite(raw.metrics.derived_view_payload_size_bytes)
       && Number.isFinite(raw.metrics.bounded_observation_ingest_total_ms)
       && Number.isFinite(raw.metrics.bounded_observation_ingest_mean_ms)
+      && Number.isFinite(raw.accepted_result_rsp_window_metadata_span_ms)
+      && raw.accepted_result_rsp_window_metadata_span_ms >= raw.limited_window_duration_ms
       && raw.rsp_result_count >= 1
       && raw.monitoring_result_produced === true
       && (raw.expected_anomaly !== true || raw.anomaly_result_generated === true)
@@ -2430,6 +2474,23 @@ async function runLimitedCaregiverTimeWindowAccessScenario(scenario, opts, runRo
     derived_time_window_resource_publicly_readable: null,
     caregiver_can_access_full_stream: false,
     caregiver_can_access_derived_time_window: false,
+    fake_replayer_used: false,
+    data_source_mode: 'real_fixture_10min',
+    source_dataset_path: LIMITED_FIXTURE_SOURCE_DATASET_PATH,
+    bounded_fixture_path: LIMITED_FIXTURE_PATH,
+    source_observation_count: LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT,
+    bounded_fixture_observation_count: 0,
+    bounded_fixture_window_start: LIMITED_FIXTURE_WINDOW_START,
+    bounded_fixture_window_end: LIMITED_FIXTURE_WINDOW_END,
+    bounded_fixture_duration_ms: LIMITED_FIXTURE_WINDOW_DURATION_MS,
+    stream_container_reused_for_compatibility: true,
+    logical_signal: LIMITED_LOGICAL_SIGNAL,
+    expected_property_iri: scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI,
+    physical_stream_container_url: LIMITED_PHYSICAL_STREAM_CONTAINER_URL,
+    source_events_written_count: 0,
+    in_window_events_written_count: 0,
+    out_of_window_events_written_count: 0,
+    expected_derived_observation_count: LIMITED_FIXTURE_IN_WINDOW_OBSERVATION_COUNT,
     derived_time_window_content_returned: false,
     full_stream_content_returned_to_caregiver: false,
     returned_observation_count: 0,
@@ -2472,37 +2533,46 @@ async function runLimitedCaregiverTimeWindowAccessScenario(scenario, opts, runRo
     raw.metrics.meta_policy_write_ms = setup.metaPolicyWriteMs;
 
     markEvent('panda_start_start');
-    panda = await startPanda(opts, runRoot, scenario.scenario_id, runId, phase);
+    panda = await startPanda(opts, runRoot, scenario.scenario_id, runId, phase, {}, scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI);
     markEvent('panda_ready');
     sequence.panda_started = isoNow();
     raw.metrics.panda_startup_ms = panda.ms;
     raw.resource_usage_log_file = panda.resourceUsageLogFile;
 
-    const observations = makeLimitedScenarioObservations(benchmarkRunId);
-    for (const observation of observations) {
-      const response = await postWithClaimUma(
-        raw.source_stream_url,
-        buildObservationTurtle(observation.url, observation.value, observation.timestamp),
-        ALICE_WEBID,
-        httpStatuses,
-        'limited_replay',
-      );
-      if (!(response.status >= 200 && response.status < 300)) {
-        const body = await response.text().catch(() => '');
-        throw new Error(`Failed to post deterministic SPO2 observation ${observation.url}: status=${response.status} body=${body}`);
-      }
-    }
+    const fixture = loadRealFixtureObservations(
+      LIMITED_FIXTURE_PATH,
+      LIMITED_FIXTURE_WINDOW_START,
+      LIMITED_FIXTURE_WINDOW_END,
+    );
+    raw.bounded_fixture_observation_count = fixture.boundedFixtureObservationCount;
+    raw.expected_derived_observation_count = fixture.boundedFixtureObservationCount;
+
+    markEvent('replayer_start');
+    const preload = await postObservationFixture(
+      fixture,
+      raw.source_stream_url,
+      httpStatuses,
+      'limited_replay',
+      raw.limited_window_start,
+      raw.limited_window_end,
+    );
+    markEvent('replayer_completed');
     sequence.replayer_started = isoNow();
     sequence.replayer_completed = isoNow();
+    raw.source_events_written_count = preload.sourceEventsWrittenCount;
+    raw.in_window_events_written_count = preload.inWindowEventsWrittenCount;
+    raw.out_of_window_events_written_count = preload.outOfWindowEventsWrittenCount;
     raw.replayer_process = {
-      command: 'deterministic_in_process_fixed_timestamp_replay',
+      command: 'real_fixture_10min_nt_post',
       requested_duration_seconds: null,
       process_started_at: sequence.replayer_started,
       process_exit_at: sequence.replayer_completed,
       exit_code: 0,
       exit_signal: null,
-      actual_process_runtime_ms: null,
-      observations_posted: observations.length,
+      actual_process_runtime_ms: preload.preloadMs,
+      observations_posted: preload.sourceEventsWrittenCount,
+      source_dataset_path: LIMITED_FIXTURE_SOURCE_DATASET_PATH,
+      bounded_fixture_path: LIMITED_FIXTURE_PATH,
     };
 
     const publicFullResponse = await fetch(raw.source_stream_url, {
@@ -2594,9 +2664,24 @@ async function runLimitedCaregiverTimeWindowAccessScenario(scenario, opts, runRo
       && raw.derived_time_window_resource_publicly_readable === false
       && raw.caregiver_can_access_full_stream === false
       && raw.caregiver_can_access_derived_time_window === true
+      && raw.fake_replayer_used === false
+      && raw.data_source_mode === 'real_fixture_10min'
+      && raw.stream_container_reused_for_compatibility === true
+      && raw.logical_signal === LIMITED_LOGICAL_SIGNAL
+      && raw.expected_property_iri === (scenario.expected_property_iri || DEFAULT_EXPECTED_PROPERTY_IRI)
+      && raw.physical_stream_container_url === LIMITED_PHYSICAL_STREAM_CONTAINER_URL
+      && raw.source_dataset_path === LIMITED_FIXTURE_SOURCE_DATASET_PATH
+      && raw.bounded_fixture_path === LIMITED_FIXTURE_PATH
+      && raw.source_observation_count === LIMITED_FIXTURE_SOURCE_OBSERVATION_COUNT
+      && raw.bounded_fixture_observation_count === LIMITED_FIXTURE_BOUNDED_OBSERVATION_COUNT
+      && raw.bounded_fixture_duration_ms > raw.limited_window_duration_ms
+      && raw.source_events_written_count === raw.bounded_fixture_observation_count
+      && raw.in_window_events_written_count === raw.expected_derived_observation_count
+      && raw.out_of_window_events_written_count === (raw.bounded_fixture_observation_count - raw.expected_derived_observation_count)
       && raw.derived_time_window_content_returned === true
       && raw.full_stream_content_returned_to_caregiver === false
       && raw.returned_observation_count > 0
+      && raw.returned_observation_count === raw.expected_derived_observation_count
       && raw.returned_observations_within_window === true
       && raw.content_matches_time_window === true
     );

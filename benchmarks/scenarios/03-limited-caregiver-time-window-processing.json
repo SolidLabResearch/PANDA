@@ -1,6 +1,6 @@
 {
   "scenario_id": "limited-caregiver-time-window-processing",
-  "description": "PANDA preloads a deterministic 10-minute SPO2 interval, fetches the fixed derived time-window view, and processes those derived observations through the RSP engine for caregiver-limited monitoring.",
+  "description": "PANDA posts a real 10-minute heart-rate-from-IBI slice into the legacy source container, fetches the fixed derived time-window view, and processes those derived observations through the RSP engine for caregiver-limited monitoring.",
   "expected_decision": "allow-limited-processing",
   "caregiver_actor_webid": "http://localhost:3000/caregiver/profile/card#me",
   "target_css_resources": {
@@ -8,13 +8,15 @@
     "derived_time_window_url": "http://localhost:3000/alice/derived/spo2-last-10-min/",
     "filter_resource_url": "http://localhost:3000/alice/filters/spo2-last-10-min.rq"
   },
+  "expected_property_iri": "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.ibi",
+  "logical_signal": "heart_rate_from_ibi",
   "limited_window": {
-    "start": "2023-02-13T09:27:27.265Z",
-    "end": "2023-02-13T09:37:27.265Z",
+    "start": "2026-05-13T09:04:47.027000Z",
+    "end": "2026-05-13T09:14:47.027Z",
     "duration_ms": 600000
   },
   "expected_event_rate_hz": 1,
-  "expected_in_window_observation_count": 600,
+  "expected_in_window_observation_count": 521,
   "expect_anomaly": true,
   "policy_meta_file_paths": [
     "alice/.meta",
@@ -25,7 +27,7 @@
   "panda_query_payload": {
     "type": "live",
     "actor_webid": "http://localhost:3000/caregiver/profile/card#me",
-    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (AVG(?o) AS ?avgSpO2)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/derived/spo2-last-10-min/> [RANGE 600000 STEP 600000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
-    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" } .\n"
+    "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (AVG(?o) AS ?avgHeartRateFromIbi)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/derived/spo2-last-10-min/> [RANGE 600000 STEP 600000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
+    "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?heartRateValue . ?heartRateValue math:lessThan 90. } => { ?s ex:alert \"HEART_RATE_ALERT\" } .\n"
   }
 }

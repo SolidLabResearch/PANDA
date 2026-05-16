@@ -6,6 +6,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const EPSILON_MS = 1;
 const LIMITED_SCENARIO_ID = 'limited-caregiver-time-window-access';
 const LIMITED_PROCESSING_SCENARIO_ID = 'limited-caregiver-time-window-processing';
+const REAL_LIMITED_DATA_SOURCE_MODE = 'real_fixture_10min';
+const LIMITED_LOGICAL_SIGNAL = 'heart_rate_from_ibi';
+const LIMITED_EXPECTED_PROPERTY_IRI = 'https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/wearable.ibi';
+const LIMITED_PHYSICAL_STREAM_CONTAINER_URL = 'http://localhost:3000/alice/spo2/';
+const LIMITED_SOURCE_DATASET_PATH = '/Users/kushbisen/Code/stream-aggregator-evaluation-mapper/output/heart-rate-from-ibi-2026-05-13T140357-corrected.nt';
+const LIMITED_BOUNDED_FIXTURE_PATH = path.join(ROOT, 'benchmarks', 'generated', 'heart-rate-ibi-real-10min.nt');
 
 function parseArgs(argv) {
   const out = { benchmarkId: null };
@@ -35,6 +41,12 @@ const NUMERIC_METADATA_FIELDS = new Set([
   'replayer_duration_seconds',
   'limited_window_duration_ms',
   'returned_observation_count',
+  'source_observation_count',
+  'source_fixture_observation_count',
+  'bounded_fixture_observation_count',
+  'bounded_view_observation_count',
+  'out_of_window_observation_count',
+  'bounded_fixture_duration_ms',
 ]);
 
 function validate(row) {
@@ -56,23 +68,48 @@ function validate(row) {
     requireCheck(row.derived_time_window_resource_publicly_readable === false, 'derived view is publicly readable');
     requireCheck(row.caregiver_can_access_full_stream === false, 'caregiver can access full stream');
     requireCheck(row.caregiver_can_access_derived_time_window === true, 'caregiver cannot access derived view');
+    requireCheck(row.fake_replayer_used === false, 'fake_replayer_used is not false');
+    requireCheck(row.data_source_mode === REAL_LIMITED_DATA_SOURCE_MODE, 'data_source_mode is not real_fixture_10min');
+    requireCheck(row.stream_container_reused_for_compatibility === true, 'stream_container_reused_for_compatibility is not true');
+    requireCheck(row.logical_signal === LIMITED_LOGICAL_SIGNAL, 'logical_signal is not heart_rate_from_ibi');
+    requireCheck(row.expected_property_iri === LIMITED_EXPECTED_PROPERTY_IRI, 'expected_property_iri is not the IBI property IRI');
+    requireCheck(row.physical_stream_container_url === LIMITED_PHYSICAL_STREAM_CONTAINER_URL, 'physical_stream_container_url is not the legacy /alice/spo2/ container');
+    requireCheck(row.source_dataset_path === LIMITED_SOURCE_DATASET_PATH, 'source_dataset_path does not point at the real IBI source dataset');
+    requireCheck(row.bounded_fixture_path === LIMITED_BOUNDED_FIXTURE_PATH, 'bounded_fixture_path does not point at the copied 10-minute fixture');
+    requireCheck(row.source_fixture_path === LIMITED_BOUNDED_FIXTURE_PATH, 'source_fixture_path does not point at the copied 10-minute fixture');
     requireCheck(row.full_stream_content_returned_to_caregiver === false, 'full stream content was returned to caregiver');
     requireCheck(row.derived_time_window_content_returned === true, 'derived content is empty or missing');
-    requireCheck(row.source_events_written_count >= 602, 'source_events_written_count must be at least 602');
-    requireCheck(row.in_window_events_written_count === 600, 'in_window_events_written_count must equal 600');
-    requireCheck(row.out_of_window_events_written_count >= 2, 'out_of_window_events_written_count must be at least 2');
-    requireCheck(row.expected_derived_observation_count === 600, 'expected_derived_observation_count must equal 600');
-    requireCheck(row.returned_observation_count === 600, 'returned_observation_count must equal 600');
+    requireCheck(isFiniteNumber(row.source_observation_count) && row.source_observation_count > row.bounded_fixture_observation_count, 'source_observation_count must be larger than the bounded fixture count');
+    requireCheck(isFiniteNumber(row.source_events_written_count) && row.source_events_written_count > 0, 'source_events_written_count must exist and be > 0');
+    requireCheck(isFiniteNumber(row.bounded_fixture_observation_count) && row.bounded_fixture_observation_count > 0, 'bounded_fixture_observation_count must exist and be > 0');
+    requireCheck(isFiniteNumber(row.source_fixture_observation_count) && row.source_fixture_observation_count > 0, 'source_fixture_observation_count must exist and be > 0');
+    requireCheck(isFiniteNumber(row.bounded_view_observation_count) && row.bounded_view_observation_count > 0, 'bounded_view_observation_count must exist and be > 0');
+    requireCheck(isFiniteNumber(row.out_of_window_observation_count) && row.out_of_window_observation_count >= 0, 'out_of_window_observation_count must exist and be >= 0');
+    requireCheck(row.source_fixture_observation_count > row.bounded_view_observation_count, 'source_fixture_observation_count must exceed the bounded view count');
+    requireCheck(row.bounded_view_observation_count === row.expected_derived_observation_count, 'bounded_view_observation_count does not match the expected in-window count');
+    requireCheck(row.bounded_fixture_observation_count > row.expected_derived_observation_count, 'bounded fixture count must exceed the in-window count');
+    requireCheck(row.source_events_written_count === row.bounded_fixture_observation_count, 'source_events_written_count does not match the bounded fixture count');
+    requireCheck(row.in_window_events_written_count === row.expected_derived_observation_count, 'in_window_events_written_count does not match the in-window count');
+    requireCheck(row.out_of_window_events_written_count === (row.bounded_fixture_observation_count - row.expected_derived_observation_count), 'out_of_window_events_written_count does not match the out-of-window tail');
+    requireCheck(row.bounded_fixture_duration_ms > row.limited_window_duration_ms, 'bounded fixture duration does not exceed the 10-minute window');
+    requireCheck(row.bounded_fixture_window_start === row.limited_window_start, 'bounded fixture start does not match the scenario window start');
+    requireCheck(Date.parse(row.bounded_fixture_window_end || '') > Date.parse(row.limited_window_end || ''), 'bounded fixture end does not extend past the scenario window end');
+    requireCheck(isFiniteNumber(row.returned_observation_count) && row.returned_observation_count > 0, 'returned_observation_count must exist and be > 0');
+    requireCheck(row.returned_observation_count === row.expected_derived_observation_count, 'returned_observation_count does not match the in-window count');
     requireCheck(row.returned_observations_within_window === true, 'returned observations are not proven to be inside the configured window');
     requireCheck(Array.isArray(row.out_of_window_observations_returned) && row.out_of_window_observations_returned.length === 0, 'out-of-window observations were returned by the derived view');
     requireCheck(row.content_matches_time_window === true, 'content_matches_time_window is not true');
-    requireCheck(row.rsp_event_add_count_total === 600, 'rsp_event_add_count_total must equal 600');
-    requireCheck(m.derived_view_observation_count === 600, 'derived_view_observation_count must equal 600');
+    requireCheck(isFiniteNumber(row.rsp_event_add_count_total) && row.rsp_event_add_count_total > 0, 'rsp_event_add_count_total must exist and be > 0');
+    requireCheck(isFiniteNumber(m.derived_view_observation_count) && m.derived_view_observation_count > 0, 'derived_view_observation_count must exist and be > 0');
+    requireCheck(m.derived_view_observation_count === row.expected_derived_observation_count, 'derived_view_observation_count does not match the in-window count');
+    requireCheck(isFiniteNumber(row.accepted_result_event_count) && row.accepted_result_event_count === row.bounded_view_observation_count, 'accepted_result_event_count does not match bounded_view_observation_count');
     requireCheck(isFiniteNumber(m.derived_view_fetch_ms) && m.derived_view_fetch_ms >= 0, 'derived_view_fetch_ms must exist');
     requireCheck(isFiniteNumber(m.derived_view_payload_size_bytes) && m.derived_view_payload_size_bytes > 0, 'derived_view_payload_size_bytes must exist and be > 0');
     requireCheck(isFiniteNumber(m.derived_view_parse_ms) && m.derived_view_parse_ms >= 0, 'derived_view_parse_ms must exist');
     requireCheck(isFiniteNumber(m.bounded_observation_ingest_total_ms) && m.bounded_observation_ingest_total_ms >= 0, 'bounded_observation_ingest_total_ms must exist');
     requireCheck(isFiniteNumber(m.bounded_observation_ingest_mean_ms) && m.bounded_observation_ingest_mean_ms >= 0, 'bounded_observation_ingest_mean_ms must exist');
+    requireCheck(isFiniteNumber(row.accepted_result_rsp_window_metadata_span_ms) && row.accepted_result_rsp_window_metadata_span_ms >= row.limited_window_duration_ms, 'accepted_result_rsp_window_metadata_span_ms must exist and cover the 10-minute window');
+    requireCheck(isFiniteNumber(row.accepted_result_rsp_window_metadata_span_ms) && row.accepted_result_rsp_window_metadata_span_ms >= 600000, 'accepted_result_rsp_window_metadata_span_ms is shorter than 10 minutes');
     requireCheck(row.rsp_result_count >= 1, 'rsp_result_count must be at least 1');
     requireCheck(row.monitoring_result_produced === true, 'monitoring_result_produced is not true');
     if (row.expected_anomaly === true) {
@@ -87,16 +124,21 @@ function validate(row) {
     requireCheck(typeof row.returned_observation_max_timestamp === 'string' && row.returned_observation_max_timestamp.length > 0, 'returned_observation_max_timestamp is missing');
     requireCheck(typeof row.limited_window_start === 'string' && row.limited_window_start.length > 0, 'limited_window_start is missing');
     requireCheck(typeof row.limited_window_end === 'string' && row.limited_window_end.length > 0, 'limited_window_end is missing');
+    requireCheck(typeof row.bounded_fixture_window_start === 'string' && row.bounded_fixture_window_start.length > 0, 'bounded_fixture_window_start is missing');
+    requireCheck(typeof row.bounded_fixture_window_end === 'string' && row.bounded_fixture_window_end.length > 0, 'bounded_fixture_window_end is missing');
     const windowStartMs = Date.parse(row.limited_window_start || '');
     const windowEndMs = Date.parse(row.limited_window_end || '');
+    const boundedWindowStartMs = Date.parse(row.bounded_fixture_window_start || '');
+    const boundedWindowEndMs = Date.parse(row.bounded_fixture_window_end || '');
     const minMs = Date.parse(row.returned_observation_min_timestamp || '');
     const maxMs = Date.parse(row.returned_observation_max_timestamp || '');
     requireCheck(Number.isFinite(windowStartMs) && Number.isFinite(windowEndMs), 'configured time window is not parseable');
+    requireCheck(Number.isFinite(boundedWindowStartMs) && Number.isFinite(boundedWindowEndMs), 'bounded fixture window is not parseable');
     requireCheck(Number.isFinite(minMs) && Number.isFinite(maxMs), 'timestamp validation is missing or inconclusive');
     if (Number.isFinite(windowStartMs) && Number.isFinite(windowEndMs) && Number.isFinite(minMs) && Number.isFinite(maxMs)) {
       requireCheck(minMs >= windowStartMs, 'minimum returned observation timestamp is before the configured window');
       requireCheck(maxMs < windowEndMs, 'maximum returned observation timestamp is outside the configured half-open window');
-      requireCheck(maxMs - minMs >= 599000, 'returned observation timestamps do not cover the expected 10-minute interval');
+      requireCheck(maxMs - minMs <= row.bounded_fixture_duration_ms, 'returned observation timestamps exceed the bounded fixture duration');
     }
     requireCheck(row.accepted_result_validation_reason === 'event_time_span_full_window' || row.accepted_result_validation_reason === 'rsp_engine_window_metadata_full_window', 'accepted result does not prove a full 10-minute window');
     requireCheck(isFiniteNumber(row.accepted_result_event_time_span_ms) || isFiniteNumber(row.accepted_result_rsp_window_metadata_span_ms), 'accepted result window evidence is missing');
@@ -131,20 +173,44 @@ function validate(row) {
     requireCheck(row.caregiver_requester_used === true, 'caregiver_requester_used is not true');
     requireCheck(row.caregiver_can_access_full_stream === false, 'caregiver can access full stream');
     requireCheck(row.caregiver_can_access_derived_time_window === true, 'caregiver cannot access derived view');
+    requireCheck(row.fake_replayer_used === false, 'fake_replayer_used is not false');
+    requireCheck(row.data_source_mode === REAL_LIMITED_DATA_SOURCE_MODE, 'data_source_mode is not real_fixture_10min');
+    requireCheck(row.stream_container_reused_for_compatibility === true, 'stream_container_reused_for_compatibility is not true');
+    requireCheck(row.logical_signal === LIMITED_LOGICAL_SIGNAL, 'logical_signal is not heart_rate_from_ibi');
+    requireCheck(row.expected_property_iri === LIMITED_EXPECTED_PROPERTY_IRI, 'expected_property_iri is not the IBI property IRI');
+    requireCheck(row.physical_stream_container_url === LIMITED_PHYSICAL_STREAM_CONTAINER_URL, 'physical_stream_container_url is not the legacy /alice/spo2/ container');
+    requireCheck(row.source_dataset_path === LIMITED_SOURCE_DATASET_PATH, 'source_dataset_path does not point at the real IBI source dataset');
+    requireCheck(row.bounded_fixture_path === LIMITED_BOUNDED_FIXTURE_PATH, 'bounded_fixture_path does not point at the copied 10-minute fixture');
     requireCheck(row.derived_time_window_content_returned === true, 'derived content is empty or missing');
     requireCheck(row.full_stream_content_returned_to_caregiver === false, 'full stream content was returned to caregiver');
+    requireCheck(isFiniteNumber(row.source_observation_count) && row.source_observation_count > row.bounded_fixture_observation_count, 'source_observation_count must be larger than the bounded fixture count');
+    requireCheck(isFiniteNumber(row.source_events_written_count) && row.source_events_written_count > 0, 'source_events_written_count must exist and be > 0');
+    requireCheck(isFiniteNumber(row.bounded_fixture_observation_count) && row.bounded_fixture_observation_count > 0, 'bounded_fixture_observation_count must exist and be > 0');
+    requireCheck(row.bounded_fixture_observation_count > row.expected_derived_observation_count, 'bounded fixture count must exceed the in-window count');
+    requireCheck(row.source_events_written_count === row.bounded_fixture_observation_count, 'source_events_written_count does not match the bounded fixture count');
+    requireCheck(row.in_window_events_written_count === row.expected_derived_observation_count, 'in_window_events_written_count does not match the in-window count');
+    requireCheck(row.out_of_window_events_written_count === (row.bounded_fixture_observation_count - row.expected_derived_observation_count), 'out_of_window_events_written_count does not match the out-of-window tail');
+    requireCheck(row.bounded_fixture_duration_ms > row.limited_window_duration_ms, 'bounded fixture duration does not exceed the 10-minute window');
+    requireCheck(row.bounded_fixture_window_start === row.limited_window_start, 'bounded fixture start does not match the scenario window start');
+    requireCheck(Date.parse(row.bounded_fixture_window_end || '') > Date.parse(row.limited_window_end || ''), 'bounded fixture end does not extend past the scenario window end');
     requireCheck(isFiniteNumber(row.returned_observation_count) && row.returned_observation_count > 0, 'returned_observation_count must exist and be > 0');
+    requireCheck(row.returned_observation_count === row.expected_derived_observation_count, 'returned_observation_count does not match the in-window count');
     requireCheck(row.returned_observations_within_window === true, 'returned observations are not proven to be inside the configured window');
     requireCheck(row.content_matches_time_window === true, 'content_matches_time_window is not true');
     requireCheck(typeof row.returned_observation_min_timestamp === 'string' && row.returned_observation_min_timestamp.length > 0, 'returned_observation_min_timestamp is missing');
     requireCheck(typeof row.returned_observation_max_timestamp === 'string' && row.returned_observation_max_timestamp.length > 0, 'returned_observation_max_timestamp is missing');
     requireCheck(typeof row.limited_window_start === 'string' && row.limited_window_start.length > 0, 'limited_window_start is missing');
     requireCheck(typeof row.limited_window_end === 'string' && row.limited_window_end.length > 0, 'limited_window_end is missing');
+    requireCheck(typeof row.bounded_fixture_window_start === 'string' && row.bounded_fixture_window_start.length > 0, 'bounded_fixture_window_start is missing');
+    requireCheck(typeof row.bounded_fixture_window_end === 'string' && row.bounded_fixture_window_end.length > 0, 'bounded_fixture_window_end is missing');
     const windowStartMs = Date.parse(row.limited_window_start || '');
     const windowEndMs = Date.parse(row.limited_window_end || '');
+    const boundedWindowStartMs = Date.parse(row.bounded_fixture_window_start || '');
+    const boundedWindowEndMs = Date.parse(row.bounded_fixture_window_end || '');
     const minMs = Date.parse(row.returned_observation_min_timestamp || '');
     const maxMs = Date.parse(row.returned_observation_max_timestamp || '');
     requireCheck(Number.isFinite(windowStartMs) && Number.isFinite(windowEndMs), 'configured time window is not parseable');
+    requireCheck(Number.isFinite(boundedWindowStartMs) && Number.isFinite(boundedWindowEndMs), 'bounded fixture window is not parseable');
     requireCheck(Number.isFinite(minMs) && Number.isFinite(maxMs), 'timestamp validation is missing or inconclusive');
     if (Number.isFinite(windowStartMs) && Number.isFinite(windowEndMs) && Number.isFinite(minMs) && Number.isFinite(maxMs)) {
       requireCheck(minMs >= windowStartMs, 'minimum returned observation timestamp is before the configured window');
