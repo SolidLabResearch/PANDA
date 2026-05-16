@@ -1859,7 +1859,7 @@ async function runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phas
     monitoring_started_from_unauthorized_data: false,
     data_source_mode: 'real_replayer',
     fake_replayer_used: false,
-    replayer_dataset_path: path.join(ROOT, '..', 'policy-aware-decentralized-stream-replayer', 'data', 'heart.nt'),
+    replayer_dataset_path: path.join(ROOT, 'replayer', 'data', 'heart.nt'),
     replayer_target_url: targetUrl,
     replayer_started: null,
     replayer_completed: null,

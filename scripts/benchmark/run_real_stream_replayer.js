@@ -5,7 +5,10 @@ const { performance } = require('perf_hooks');
 const { randomUUID } = require('crypto');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const WORKSPACE_ROOT = path.resolve(REPO_ROOT, '..');
+const DEFAULT_REPLAYER_REPO_ROOT = path.join(REPO_ROOT, 'replayer');
+const REPLAYER_REPO_ROOT = process.env.REPLAYER_REPO
+  ? path.resolve(process.env.REPLAYER_REPO)
+  : DEFAULT_REPLAYER_REPO_ROOT;
 const DEFAULT_CLAIM_TOKEN = 'http://localhost:3000/alice/profile/card#me';
 const CLAIM_TOKEN_FORMAT = 'urn:solidlab:uma:claims:formats:webid';
 
@@ -152,9 +155,11 @@ function resolveDatasetPath(datasetRelativePath) {
   if (path.isAbsolute(datasetRelativePath)) {
     candidates.push(datasetRelativePath);
   } else {
-    candidates.push(path.join(REPO_ROOT, datasetRelativePath));
-    candidates.push(path.join(WORKSPACE_ROOT, 'policy-aware-decentralized-stream-replayer', datasetRelativePath.replace(/^\.\//, '')));
-    candidates.push(path.join(WORKSPACE_ROOT, 'policy-aware-decentralized-stream-replayer', 'data', path.basename(datasetRelativePath)));
+    const normalizedRelativePath = datasetRelativePath.replace(/^\.\//, '');
+    candidates.push(path.join(REPLAYER_REPO_ROOT, normalizedRelativePath));
+    candidates.push(path.join(REPLAYER_REPO_ROOT, 'data', path.basename(datasetRelativePath)));
+    candidates.push(path.join(REPO_ROOT, normalizedRelativePath));
+    candidates.push(path.join(REPO_ROOT, 'data', path.basename(datasetRelativePath)));
   }
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
@@ -179,7 +184,7 @@ async function main() {
 
   const metadata = {
     benchmark_run_id: opts.benchmarkRunId,
-    replayer_repo_dir: REPO_ROOT,
+    replayer_repo_dir: REPLAYER_REPO_ROOT,
     dataset_path: datasetPath,
     target_url: opts.targetUrl,
     duration_seconds: opts.durationSeconds,
