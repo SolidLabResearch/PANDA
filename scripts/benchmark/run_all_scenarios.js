@@ -461,14 +461,51 @@ function renderTemplate(template, values) {
   return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => String(values[key] ?? ''));
 }
 
-async function runReplayer(scenario, opts, runRoot, benchmarkRunId, counters) {
+function splitCommandLine(command) {
+  const args = [];
+  let current = '';
+  let quote = null;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else if (char === '\\' && quote === '"' && index + 1 < command.length) {
+        index += 1;
+        current += command[index];
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        args.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current.length > 0) {
+    args.push(current);
+  }
+  return args;
+}
+
+async function runReplayer(scenario, opts, runRoot, benchmarkRunId, counters, rawDir = path.join(runRoot, 'raw')) {
   const command = renderTemplate(scenario.replayer_command, {
     replayer_duration_seconds: opts.replayerDuration,
     benchmark_run_id: benchmarkRunId,
+    run_raw_dir: rawDir,
   });
   const logFile = path.join(runRoot, 'raw', `replayer-${benchmarkRunId}.log`);
   ensureFileExists(logFile);
-  const [cmd, ...args] = command.split(/\s+/);
+  const [cmd, ...args] = splitCommandLine(command);
   const stopWatcher = startReplayerLogWatcher(logFile, counters);
   const startedAtPerf = performance.now();
   const startedAtWall = isoNow();
@@ -1516,6 +1553,7 @@ function validateDenialOutput(raw) {
     && raw.protected_content_returned === false
     && raw.denial_observed === true
     && raw.monitoring_started_from_unauthorized_data === false
+    && raw.fake_replayer_used === false
     && raw.scenario_passed === true
   );
   if (!passed) {
@@ -1612,7 +1650,7 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     sequence.panda_started = isoNow();
     raw.metrics.panda_startup_ms = panda.ms;
 
-    replayer = await runReplayer(scenario, opts, runRoot, benchmarkRunId, counters);
+    replayer = await runReplayer(scenario, opts, runRoot, benchmarkRunId, counters, rawDir);
     stopReplayerWatcher = replayer.stopWatcher || (() => {});
     markEvent('replayer_start');
     sequence.replayer_started = isoNow();
@@ -1707,6 +1745,8 @@ async function runOneScenario(scenario, opts, runRoot, runId, phase) {
     stopReplayerWatcher();
     markEvent('replayer_completed');
     sequence.replayer_completed = isoNow();
+    raw.replayer_started = sequence.replayer_started;
+    raw.replayer_completed = sequence.replayer_completed;
     raw.replayer_process = {
       command: replayer.command,
       requested_duration_seconds: opts.replayerDuration,
@@ -1817,6 +1857,12 @@ async function runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phas
     denial_observed: false,
     protected_content_returned: false,
     monitoring_started_from_unauthorized_data: false,
+    data_source_mode: 'real_replayer',
+    fake_replayer_used: false,
+    replayer_dataset_path: path.join(ROOT, '..', 'policy-aware-decentralized-stream-replayer', 'data', 'heart.nt'),
+    replayer_target_url: targetUrl,
+    replayer_started: null,
+    replayer_completed: null,
     failure_reason: null,
     protected_target_resource_url: targetUrl,
   };
@@ -1898,7 +1944,7 @@ async function runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phas
     sequence.panda_started = isoNow();
     raw.metrics.panda_startup_ms = panda.ms;
 
-    replayer = await runReplayer(scenario, opts, runRoot, benchmarkRunId, counters);
+    replayer = await runReplayer(scenario, opts, runRoot, benchmarkRunId, counters, rawDir);
     stopReplayerWatcher = replayer.stopWatcher || (() => {});
     markEvent('replayer_start');
     sequence.replayer_started = isoNow();
@@ -1958,6 +2004,8 @@ async function runPolicyBasedDenialScenario(scenario, opts, runRoot, runId, phas
     stopReplayerWatcher();
     markEvent('replayer_completed');
     sequence.replayer_completed = isoNow();
+    raw.replayer_started = sequence.replayer_started;
+    raw.replayer_completed = sequence.replayer_completed;
     raw.replayer_process = {
       command: replayer.command,
       requested_duration_seconds: opts.replayerDuration,

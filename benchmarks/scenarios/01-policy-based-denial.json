@@ -21,7 +21,7 @@
     "query_template": "PREFIX saref: <https://saref.etsi.org/core/>\nPREFIX : <https://rsp.js/>\nREGISTER RStream <output_{benchmark_run_id}> AS\nSELECT (AVG(?o) AS ?avg)\nFROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/spo2/> [RANGE {query_window_ms} STEP 60000]\nWHERE {\n  WINDOW :w1 {\n    ?s saref:hasValue ?o .\n  }\n}",
     "rules": "@prefix saref: <https://saref.etsi.org/core/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n@prefix ex: <http://example.org/> .\n\n{ ?s saref:hasValue ?spo2Value . ?spo2Value math:lessThan 90. } => { ?s ex:alert \"SPO2_LOW\" }. \n"
   },
-  "replayer_command": "node scripts/benchmark/live_spo2_replayer.js --url http://localhost:3000/alice/spo2/ --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id}",
+  "replayer_command": "node scripts/benchmark/run_real_stream_replayer.js --target-url http://localhost:3000/alice/spo2/ --dataset-relative-path data/heart.nt --duration {replayer_duration_seconds} --benchmark-run-id {benchmark_run_id} --raw-dir \"{run_raw_dir}\"",
   "expected_decision": "deny",
   "expected_result_shape": {
     "type": "websocket_json"
