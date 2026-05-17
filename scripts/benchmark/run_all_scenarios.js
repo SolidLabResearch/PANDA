@@ -34,7 +34,7 @@ const UMA_DIR = resolveRepoPath({
 });
 const WS_PROTOCOL = 'solid-stream-aggregator-protocol';
 const PROC_STAT = '/proc/stat';
-const DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS = 500;
+const DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS = 100;
 const PAGE_SIZE_BYTES = 4096;
 
 function parseArgs(argv) {
