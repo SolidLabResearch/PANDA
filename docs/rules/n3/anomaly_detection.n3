@@ -1,0 +1,10 @@
+# TODO: Insert the exact Notation3 (N3) rule set for PANDA anomaly detection.
+#
+# This is a placeholder file for documentation and reproducibility.
+# Do not treat this content as runnable rules until final rules are added.
+#
+# Suggested manual completion checklist:
+# - Confirm prefixes and vocabulary
+# - Confirm antecedent/consequent structure
+# - Confirm threshold or condition logic
+# - Confirm output triples and target resources

@@ -1,0 +1,10 @@
+# TODO: Insert the exact RSP-QL query for the PANDA heart/IBI monitoring scenario.
+#
+# This is a placeholder file for documentation and reproducibility.
+# Do not treat this content as a runnable query until the final query is added.
+#
+# Suggested manual completion checklist:
+# - Confirm stream IRI(s)
+# - Confirm window definition(s)
+# - Confirm prefixes and projection fields
+# - Confirm filters/aggregation logic

@@ -15,6 +15,17 @@ You can automatically fix some issues via
 npm run lint:ts:fix
 ```
 
+## Branches and benchmark scenarios
+
+This repository contains several scenario-specific and benchmark-specific branches for PANDA. These branches correspond to different UMA/ODRL policy setups, access-control scenarios, and evaluation variants.
+
+See [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md) for an overview of each branch, the scenario it represents, and the policies required to run it.
+
+## Scenarios, queries, rules, and data
+
+- [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md)
+- [docs/SCENARIOS_AND_REPRODUCIBILITY.md](docs/SCENARIOS_AND_REPRODUCIBILITY.md)
+
 ## License
 
 This code is copyrighted by [Ghent University - imec](https://www.ugent.be/ea/idlab/en) and released under the [MIT Licence](./LICENCE) 
