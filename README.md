@@ -1,7 +1,24 @@
 # PANDA
 
-The repository contains the code for the Privacy-preserving platform for ANomaly Detection in healthcare streAms (PANDA) platform, which is a service vor monitoring the health of patients to detect anomalies in their health data streams. To enable privacy, PANDA utilizes [Solid](https://solidproject.org/) as a data storage solution and extends it with [User Managed Access](https://github.com/solidLabResearch/user-managed-access) to allow the patients to specify granular access control policies for their data streams. 
+PANDA (Privacy-preserving platform for ANomaly Detection in healthcare streAms) is a research platform for anomaly detection on healthcare data streams with privacy-preserving access control.
+It uses [Solid](https://solidproject.org/) for data storage, [User Managed Access (UMA)](https://github.com/solidLabResearch/user-managed-access), and policy-based access control so patients can define granular permissions for stream access.
 
+## Repository purpose
+
+This repository serves as a research artifact for PANDA:
+- documenting benchmark branches and policy variants,
+- capturing reproducible scenario definitions, and
+- providing representative queries, rules, and dataset references used in the evaluation context.
+
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md) | Overview of branch structure, benchmark branches, and policy-related mapping. |
+| [docs/SCENARIOS_AND_REPRODUCIBILITY.md](docs/SCENARIOS_AND_REPRODUCIBILITY.md) | Scenario descriptions and reproducibility guidance. |
+| [docs/data/DATASETS.md](docs/data/DATASETS.md) | Dataset inventory and related notes. |
+| [docs/queries/rspql/heart_ibi_window.rq](docs/queries/rspql/heart_ibi_window.rq) | Example RSP-QL query for heart IBI window processing. |
+| [docs/rules/n3/anomaly_detection.n3](docs/rules/n3/anomaly_detection.n3) | Example N3 rules for anomaly detection logic. |
 
 ## Linting
 
@@ -17,19 +34,16 @@ npm run lint:ts:fix
 
 ## Branches and benchmark scenarios
 
-This repository contains several scenario-specific and benchmark-specific branches for PANDA. These branches correspond to different UMA/ODRL policy setups, access-control scenarios, and evaluation variants.
-
-See [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md) for an overview of each branch, the scenario it represents, and the policies required to run it.
+See [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md) for branch structure, benchmark scenario mapping, and policy context.
 
 ## Scenarios, queries, rules, and data
 
-- [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md)
-- [docs/SCENARIOS_AND_REPRODUCIBILITY.md](docs/SCENARIOS_AND_REPRODUCIBILITY.md)
+See [docs/SCENARIOS_AND_REPRODUCIBILITY.md](docs/SCENARIOS_AND_REPRODUCIBILITY.md) for scenario definitions and reproducibility details, with pointers to associated queries, rules, and datasets.
 
 ## License
 
-This code is copyrighted by [Ghent University - imec](https://www.ugent.be/ea/idlab/en) and released under the [MIT Licence](./LICENCE) 
+This code is copyrighted by [Ghent University - imec](https://www.ugent.be/ea/idlab/en) and released under the [MIT Licence](./LICENCE).
 
 ## Contact
 
-For any questions, please contact [Kush](mailto:mailkushbisen@gmail.com) or create an issue in the repository [here](https://github.com/SolidLabResearch/privacy-dashboard-stream/issues) .
+For any questions, please contact [Kush](mailto:mailkushbisen@gmail.com) or create an issue in the repository [here](https://github.com/SolidLabResearch/privacy-dashboard-stream/issues).
