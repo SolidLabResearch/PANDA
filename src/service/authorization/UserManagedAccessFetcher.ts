@@ -8,6 +8,10 @@
 
 import { fetch } from 'cross-fetch'
 import { TokenManagerService } from './TokenManagerService';
+
+function shouldLogUmaClaimExchange(): boolean {
+    return process.env.NODE_ENV !== 'production' || process.env.UMA_TRACE_TIMINGS === '1';
+}
 /**
  * Decodes a JSON Web Token (JWT) by parsing its payload.
  *
@@ -114,6 +118,11 @@ export class UserManagedAccessFetcher {
             ticket,
             claim_token: encodeURIComponent(this.claim.token),
             claim_token_format: this.claim.token_format,
+        }
+
+        if (shouldLogUmaClaimExchange()) {
+            console.log('[UMA][exchange] claim_token_format:', content.claim_token_format);
+            console.log('[UMA][exchange] claim_token preview:', `${this.claim.token.slice(0, 32)}...`);
         }
 
         // https://docs.kantarainitiative.org/uma/wg/rec-oauth-uma-grant-2.0.html#rfc.section.3.3.1

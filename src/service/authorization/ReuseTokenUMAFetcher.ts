@@ -3,6 +3,10 @@ import { TokenManagerService } from './TokenManagerService';
 import { Claim, parseAuthenticateHeader } from './UserManagedAccessFetcher';
 import { BenchmarkTimingContext, BenchmarkUmaTiming, durationMs, nowNs } from '../../utils/benchmark/BenchmarkTiming';
 
+function shouldLogUmaClaimExchange(): boolean {
+    return process.env.NODE_ENV !== 'production' || process.env.UMA_TRACE_TIMINGS === '1';
+}
+
 /**
  * UMA Fetcher that first attempts to reuse a previously issued access token
  * stored in the TokenManagerService before falling back to the UMA authorization flow.
@@ -139,7 +143,10 @@ export class ReuseTokenUMAFetcher {
             claim_token_format: this.claim.token_format,
         };
 
-        console.log(rptRequestBody);
+        if (shouldLogUmaClaimExchange()) {
+            console.log('[UMA][exchange] claim_token_format:', rptRequestBody.claim_token_format);
+            console.log('[UMA][exchange] claim_token preview:', `${this.claim.token.slice(0, 32)}...`);
+        }
         
 
         let rptResponse: Response;
