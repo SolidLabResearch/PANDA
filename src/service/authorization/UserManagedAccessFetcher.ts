@@ -109,11 +109,23 @@ export class UserManagedAccessFetcher {
 
         const { tokenEndpoint, ticket } = parseAuthenticateHeader(noTokenResponse.headers)
 
+        const claimToken = this.claim.token_format === "urn:solidlab:uma:claims:formats:webid"
+            ? encodeURIComponent(this.claim.token)
+            : this.claim.token;
+
         const content = {
             grant_type: this.grant_type,
             ticket,
-            claim_token: encodeURIComponent(this.claim.token),
+            claim_token: claimToken,
             claim_token_format: this.claim.token_format,
+        }
+
+        if (process.env.BENCHMARK_TIMING === '1' || process.env.NODE_ENV === 'development' || process.env.PANDA_UMA_DEBUG_CLAIMS === '1') {
+            const rawClaimToken = String(content.claim_token || '');
+            const claimTokenPreview = rawClaimToken.length > 24
+                ? `${rawClaimToken.slice(0, 12)}...${rawClaimToken.slice(-12)}`
+                : rawClaimToken;
+            console.log(`[UMA][TOKEN_EXCHANGE] endpoint=${tokenEndpoint} claim_token_format=${content.claim_token_format} claim_token_preview=${claimTokenPreview}`);
         }
 
         // https://docs.kantarainitiative.org/uma/wg/rec-oauth-uma-grant-2.0.html#rfc.section.3.3.1

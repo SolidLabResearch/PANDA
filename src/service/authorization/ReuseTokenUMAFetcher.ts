@@ -132,15 +132,24 @@ export class ReuseTokenUMAFetcher {
         }
 
         // Step 3: Request RPT from the token endpoint if not already cached
+        const claimToken = this.claim.token_format === 'urn:solidlab:uma:claims:formats:webid'
+            ? encodeURIComponent(this.claim.token)
+            : this.claim.token;
+
         const rptRequestBody = {
             grant_type: 'urn:ietf:params:oauth:grant-type:uma-ticket',
             ticket,
-            claim_token: encodeURIComponent(this.claim.token),
+            claim_token: claimToken,
             claim_token_format: this.claim.token_format,
         };
 
-        console.log(rptRequestBody);
-        
+        if (process.env.BENCHMARK_TIMING === '1' || process.env.NODE_ENV === 'development' || process.env.PANDA_UMA_DEBUG_CLAIMS === '1') {
+            const rawClaimToken = String(rptRequestBody.claim_token || '');
+            const claimTokenPreview = rawClaimToken.length > 24
+                ? `${rawClaimToken.slice(0, 12)}...${rawClaimToken.slice(-12)}`
+                : rawClaimToken;
+            console.log(`[UMA][TOKEN_EXCHANGE] endpoint=${tokenEndpoint} claim_token_format=${rptRequestBody.claim_token_format} claim_token_preview=${claimTokenPreview}`);
+        }
 
         let rptResponse: Response;
         try {
