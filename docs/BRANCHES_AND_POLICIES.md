@@ -8,6 +8,8 @@ This document maps PANDA branches to the scenarios, protected resources, UMA/ODR
 - protected resources and expected behavior are taken from scenario JSON, benchmark scripts, and UMA smoke/preflight tooling
 - anything that could not be confirmed from repository content is marked `TODO` with a short reason
 
+PANDA reproductions are expected to use the forked UMA server at [argahsuknesib/user-managed-access](https://github.com/argahsuknesib/user-managed-access), not an arbitrary upstream/default UMA server. The reason is practical, not semantic: PANDA needs UMA/CSS support for derived resources in the branch/local setup used by the documented scenarios.
+
 `docs/SCENARIOS_AND_REPRODUCIBILITY.md` provides the scenario-level reproducibility view. This document is the branch-level companion that records the concrete branch diffs, protected resources, benchmark entry points, and policy assumptions behind those scenarios.
 
 ## Branch Overview
@@ -35,6 +37,7 @@ This document maps PANDA branches to the scenarios, protected resources, UMA/ODR
 
 - Branches using it: `baseline-scenario`, `benchmark`, `feature/stabilize-uma-headless`, `node-migration`, `codex/e2e-replayer-panda-uma-flow`
 - Purpose: prove the standard UMA challenge -> token exchange -> authorized GET path works for an explicitly allowed requester
+- Example ODRL policy: an equivalent historical policy is available in the compatible UMA server repository at `https://github.com/argahsuknesib/user-managed-access/blob/benchmarking/packages/uma/config/rules/odrl/policy0.ttl`. The linked file currently uses older `spo2` labels, but PANDA documentation should describe the equivalent policy structure with canonical heart/IBI naming: `/alice/heart/`, `/alice/derived/heart/`, `/alice/heart/derived`, and `heart-last-10-min`.
 - Assignee / actor: Bob in the derived-resource examples (`http://localhost:3000/bob/profile/card#me`); protected-result benchmark scenarios also use Bob as the nurse/caregiver reader
 - Target resource: derived resource `http://localhost:3000/alice/derived/acc-x/` in the UMA smoke/live-test docs; protected-result scenario uses `http://localhost:3000/alice/protected-rsp-results/{benchmark_run_id}.ttl`
 - Action: `odrl:read`
@@ -620,8 +623,20 @@ This document maps PANDA branches to the scenarios, protected resources, UMA/ODR
 ### Starting PANDA / CSS / UMA / replayer components
 
 - CSS / UMA:
+  - use the forked UMA server at `https://github.com/argahsuknesib/user-managed-access`
   - branch runbooks repeatedly reference the sibling `user-managed-access` repo and `corepack yarn start:odrl`
   - several branches also expect `corepack yarn run script:setup-alice-derived`
+  - TODO: pin the exact compatible UMA branch or commit in the relevant runbook or branch-specific setup instructions if/when maintainers confirm it
+
+Operational setup snippet:
+
+```text
+1. Clone https://github.com/argahsuknesib/user-managed-access.
+2. Install dependencies by following that repository's README.
+3. Run the UMA/CSS components from that repository when reproducing PANDA.
+4. Do not assume an arbitrary upstream/default UMA server is compatible with PANDA.
+5. TODO: pin the exact compatible UMA branch or commit for archival reproducibility.
+```
 - PANDA:
   - `npm run start`
 - UMA smoke / preflight:

@@ -3,6 +3,8 @@
 PANDA (Privacy-preserving platform for ANomaly Detection in healthcare streAms) is a research platform for anomaly detection on healthcare data streams with privacy-preserving access control.
 It uses [Solid](https://solidproject.org/) for data storage, [User Managed Access (UMA)](https://github.com/solidLabResearch/user-managed-access), and policy-based access control so patients can define granular permissions for stream access.
 
+PANDA must be reproduced with the forked UMA server at [argahsuknesib/user-managed-access](https://github.com/argahsuknesib/user-managed-access), not an arbitrary upstream/default UMA server. PANDA depends on UMA/CSS support for derived resources, so the fork should be cloned and used for PANDA experiments unless a maintainer has pinned a different compatible branch or commit.
+
 ## Repository purpose
 
 This repository serves as a research artifact for PANDA:

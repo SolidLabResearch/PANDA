@@ -18,6 +18,10 @@ Use this document for the scenario-level overview, and use [docs/BRANCHES_AND_PO
 
 Historically, the repository has used `/alice/spo2/` and `/alice/heart-ibi/` in older examples and run outputs. The canonical scenario naming now uses `/alice/heart/` for the protected source stream, with `heart-last-10-min` for the bounded derived window.
 
+### UMA Dependency
+
+PANDA scenarios are not expected to reproduce correctly against an arbitrary upstream UMA server. Use the forked UMA server at [argahsuknesib/user-managed-access](https://github.com/argahsuknesib/user-managed-access), because PANDA depends on UMA/CSS support for derived resources. If the exact compatible branch or commit is known in a branch-specific setup, pin it there; otherwise maintainers should add a TODO to pin the exact revision for archival reproducibility.
+
 ## Scenario: RSP-QL Heart / IBI Monitoring
 
 ### Purpose
@@ -112,6 +116,7 @@ No single policy document covers all branches. The evidence-based policy variant
 - baseline allow pattern:
   - simple Bob read access to a derived resource such as `/alice/derived/acc-x/`
   - protected-result branches where Bob is the allowed nurse/caregiver reader
+  - historical example policy: `https://github.com/argahsuknesib/user-managed-access/blob/benchmarking/packages/uma/config/rules/odrl/policy0.ttl` currently uses older `spo2` labels, but PANDA should document the equivalent policy structure with canonical heart/IBI naming: `/alice/heart/`, `/alice/derived/heart/`, `/alice/heart/derived`, and `heart-last-10-min`
 - limited caregiver pattern:
   - caregiver access is limited to `http://localhost:3000/alice/derived/heart-last-10-min/`
   - exact Turtle policy file is not tracked
@@ -126,6 +131,9 @@ No single policy document covers all branches. The evidence-based policy variant
 - concurrent-requests pattern:
   - protected target must first challenge
   - optional purpose-enforcement matrix checks missing or wrong purpose
+- setup assumption:
+  - PANDA reproductions should use the forked UMA server at `https://github.com/argahsuknesib/user-managed-access`, not an arbitrary upstream/default UMA server
+  - if no exact branch or commit is documented in setup files, preserve a TODO to pin the compatible UMA revision
 
 For actor, target, action, and constraint details by branch, see [docs/BRANCHES_AND_POLICIES.md](BRANCHES_AND_POLICIES.md).
 
