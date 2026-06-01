@@ -217,12 +217,3 @@ The following inconsistencies are known and should be preserved as documentation
 
 - `node-migration` contains committed benchmark outputs such as `benchmark-results/uma-*`.
 - These are historical artifacts and must be rerun before citation; their presence in the repository is not enough to treat them as current benchmark evidence.
-
-## Publication TODOs
-
-The following uncertainties remain and should stay explicit until confirmed from repository evidence:
-
-- confirm which branch or scenario [docs/queries/rspql/heart_ibi_window.rq](queries/rspql/heart_ibi_window.rq) is intended to represent
-- confirm which branch or scenario [docs/rules/n3/anomaly_detection.n3](rules/n3/anomaly_detection.n3) is intended to represent
-- confirm whether a canonical scenario-level policy example should be added, or whether policy examples should remain branch-specific only
-- confirm whether the limited-caregiver scenario has a tracked Turtle policy outside the inspected branch contents
