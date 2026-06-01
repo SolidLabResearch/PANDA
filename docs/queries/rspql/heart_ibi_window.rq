@@ -3,7 +3,7 @@ PREFIX : <https://rsp.js/>
 PREFIX dahcc: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
 REGISTER RStream <output> AS
 SELECT (MAX(?o) AS ?MaxValue)
-FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/heart-ibi/> [RANGE 60000 STEP 60000]
+FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/heart/> [RANGE 60000 STEP 60000]
 WHERE {
   WINDOW :w1 {
     ?s saref:relatesToProperty dahcc:wearable.ibi .

@@ -17,7 +17,7 @@ This repository serves as a research artifact for PANDA:
 | [docs/BRANCHES_AND_POLICIES.md](docs/BRANCHES_AND_POLICIES.md) | Overview of branch structure, benchmark branches, and policy-related mapping. |
 | [docs/SCENARIOS_AND_REPRODUCIBILITY.md](docs/SCENARIOS_AND_REPRODUCIBILITY.md) | Scenario descriptions and reproducibility guidance. |
 | [docs/data/DATASETS.md](docs/data/DATASETS.md) | Dataset inventory and related notes. |
-| [docs/queries/rspql/heart_ibi_window.rq](docs/queries/rspql/heart_ibi_window.rq) | Example RSP-QL query for heart IBI window processing. |
+| [docs/queries/rspql/heart_ibi_window.rq](docs/queries/rspql/heart_ibi_window.rq) | Example RSP-QL query for heart/IBI window processing. |
 | [docs/rules/n3/anomaly_detection.n3](docs/rules/n3/anomaly_detection.n3) | Example N3 rules for anomaly detection logic. |
 
 ## Linting
