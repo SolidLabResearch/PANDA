@@ -1,0 +1,5 @@
+@prefix saref: <https://saref.etsi.org/core/> .
+@prefix math: <http://www.w3.org/2000/10/swap/math#> .
+@prefix ex: <http://example.org/> .
+
+{ ?s saref:hasValue ?value . ?value math:greaterThan 99.9. } => { ?s ex:alert "ALERT". }.
