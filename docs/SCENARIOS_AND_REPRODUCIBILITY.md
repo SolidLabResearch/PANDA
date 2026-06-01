@@ -117,6 +117,8 @@ No single policy document covers all branches. The evidence-based policy variant
   - simple Bob read access to a derived resource such as `/alice/derived/acc-x/`
   - protected-result branches where Bob is the allowed nurse/caregiver reader
   - historical example policy: `https://github.com/argahsuknesib/user-managed-access/blob/benchmarking/packages/uma/config/rules/odrl/policy0.ttl` currently uses older `spo2` labels, but PANDA should document the equivalent policy structure with canonical heart/IBI naming: `/alice/heart/`, `/alice/derived/heart/`, `/alice/heart/derived`, and `heart-last-10-min`
+  - canonical PANDA example policy file: [docs/policies/example-heart-policy.ttl](docs/policies/example-heart-policy.ttl)
+  - this file is an example policy shape only; branch-specific policy behavior still takes precedence when documented
 - limited caregiver pattern:
   - caregiver access is limited to `http://localhost:3000/alice/derived/heart-last-10-min/`
   - exact Turtle policy file is not tracked

@@ -38,6 +38,19 @@ PANDA reproductions are expected to use the forked UMA server at [argahsuknesib/
 - Branches using it: `baseline-scenario`, `benchmark`, `feature/stabilize-uma-headless`, `node-migration`, `codex/e2e-replayer-panda-uma-flow`
 - Purpose: prove the standard UMA challenge -> token exchange -> authorized GET path works for an explicitly allowed requester
 - Example ODRL policy: an equivalent historical policy is available in the compatible UMA server repository at `https://github.com/argahsuknesib/user-managed-access/blob/benchmarking/packages/uma/config/rules/odrl/policy0.ttl`. The linked file currently uses older `spo2` labels, but PANDA documentation should describe the equivalent policy structure with canonical heart/IBI naming: `/alice/heart/`, `/alice/derived/heart/`, `/alice/heart/derived`, and `heart-last-10-min`.
+- Canonical PANDA example policy file: [docs/policies/example-heart-policy.ttl](docs/policies/example-heart-policy.ttl). Treat this as the documentation/example policy shape; branch-specific policy behavior still takes precedence when documented.
+- Equivalent PANDA heart/IBI policy shape:
+  - Alice owner permissions cover the protected source stream, derived-resource container, and notification channel ownership.
+  - Bob / benchmark-client permissions cover the allowed read path for protected result access and benchmark validation.
+  - PANDA permissions cover protected scenario execution against the canonical heart/IBI resources.
+  - Replayer permissions cover publishing the source stream input that drives the live scenario or benchmark.
+  - Source container access applies to `http://localhost:3000/alice/heart/`.
+  - Derived-resource container access applies to `http://localhost:3000/alice/derived/heart/` and `http://localhost:3000/alice/derived/`.
+  - Latest derived result read access applies to `http://localhost:3000/alice/derived/latest`.
+  - Webhook channel access applies to `http://localhost:3000/.notifications/WebhookChannel2023/`.
+  - `urn:client:benchmark` purpose constraints apply to benchmark actors that are allowed to read the protected result path.
+  - Canonical resource names are `http://localhost:3000/alice/heart/`, `http://localhost:3000/alice/derived/heart/`, `http://localhost:3000/alice/heart/derived`, `http://localhost:3000/alice/derived/latest`, `http://localhost:3000/alice/derived/`, and `http://localhost:3000/.notifications/WebhookChannel2023/`.
+  - The linked external policy currently uses historical `spo2` labels, and those labels should not be copied into new PANDA-facing documentation.
 - Assignee / actor: Bob in the derived-resource examples (`http://localhost:3000/bob/profile/card#me`); protected-result benchmark scenarios also use Bob as the nurse/caregiver reader
 - Target resource: derived resource `http://localhost:3000/alice/derived/acc-x/` in the UMA smoke/live-test docs; protected-result scenario uses `http://localhost:3000/alice/protected-rsp-results/{benchmark_run_id}.ttl`
 - Action: `odrl:read`
@@ -47,6 +60,7 @@ PANDA reproductions are expected to use the forked UMA server at [argahsuknesib/
 - Authorized behavior: initial GET returns UMA challenge; token exchange succeeds; authorized GET returns `200`
 - Denied behavior: wrong target and deny-claim path are expected to return `401` or `403`
 - Relevant files:
+  - [docs/policies/example-heart-policy.ttl](docs/policies/example-heart-policy.ttl)
   - `documents/LIVE_TEST_INSTRUCTIONS.md` on `node-migration` and `codex/e2e-replayer-panda-uma-flow`
   - `scripts/uma/smoke.js` on `feature/stabilize-uma-headless`
   - `benchmarks/scenarios/10-uma-replayer-panda-derived-anomaly-e2e.json` on `baseline-scenario`
