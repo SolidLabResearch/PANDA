@@ -1,5 +1,8 @@
 # PANDA branches and policy scenarios
 
+The document serves as a guide for the differet scenarios implemented and benchmarked with the PANDA platform. Moreover, the branches
+
+
 This document maps PANDA branches to:
 - the scenario implemented by the branch
 - the protected resource or stream involved

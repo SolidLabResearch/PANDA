@@ -1,10 +1,12 @@
-# TODO: Insert the exact RSP-QL query for the PANDA heart/IBI monitoring scenario.
-#
-# This is a placeholder file for documentation and reproducibility.
-# Do not treat this content as a runnable query until the final query is added.
-#
-# Suggested manual completion checklist:
-# - Confirm stream IRI(s)
-# - Confirm window definition(s)
-# - Confirm prefixes and projection fields
-# - Confirm filters/aggregation logic
+PREFIX saref: <https://saref.etsi.org/core/>
+PREFIX : <https://rsp.js/>
+PREFIX dahcc: <https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/>
+REGISTER RStream <output> AS
+SELECT (MAX(?o) AS ?MaxValue)
+FROM NAMED WINDOW :w1 ON STREAM <http://localhost:3000/alice/heart-ibi/> [RANGE 60000 STEP 60000]
+WHERE {
+  WINDOW :w1 {
+    ?s saref:relatesToProperty dahcc:wearable.ibi .
+    ?s saref:hasValue ?o .
+  }
+}
