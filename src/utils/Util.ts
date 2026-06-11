@@ -1,10 +1,10 @@
 import { createHash } from 'crypto'
 import { TokenManagerService } from '../service/authorization/TokenManagerService';
+import { RdfHttpClient } from './RdfHttpClient';
 const { exec } = require('child_process');
-const ldfetch = require('ldfetch');
-const ld_fetch = new ldfetch({});
 const N3 = require('n3');
 const token_manager = TokenManagerService.getInstance();
+const rdfFetch = new RdfHttpClient();
 
 /**
  * Hash a string using the MD5 algorithm.
@@ -131,7 +131,7 @@ export async function find_relevant_streams(solid_pod_url: string, interest_metr
         try {
             const public_type_index = await find_public_type_index(solid_pod_url);
             const token = token_manager.getAccessToken(solid_pod_url);
-            const response = await ld_fetch.get(public_type_index, {
+            const response = await rdfFetch.get(public_type_index, {
                 Headers: {
                 }
             });
@@ -164,7 +164,7 @@ export async function if_exists_relevant_streams(solid_pod_url: string, interest
     const token = token_manager.getAccessToken(solid_pod_url);
     try {
         const public_type_index = await find_public_type_index(solid_pod_url);
-        const response = await ld_fetch.get(public_type_index, {
+        const response = await rdfFetch.get(public_type_index, {
             Headers: {
             }
         });
@@ -193,7 +193,7 @@ export async function find_public_type_index(solid_pod_url: string): Promise<str
     const token = token_manager.getAccessToken(solid_pod_url);
     const profile_document = solid_pod_url + "profile/card";
     try {
-        const response = await ld_fetch.get(profile_document, {
+        const response = await rdfFetch.get(profile_document, {
             Headers: {
             }
         });

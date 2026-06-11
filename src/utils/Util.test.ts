@@ -27,10 +27,10 @@ it('insertion_sort_test', () => {
 });
 
 describe('finding_public_type_index', () => {
-    jest.mock('ldfetch', () => {
-        jest.fn()
+    beforeEach(() => {
+        jest.restoreAllMocks();
     });
-    const ldfetch = require('ldfetch');
+
     it('should return public type index', () => {
         // const pod_url = 'http://n061-14a.wall2.ilabt.iminds.be:3000/';
         // const profile_document_url = pod_url + 'profile/card';
@@ -41,15 +41,23 @@ describe('finding_public_type_index', () => {
             ]
         };
 
-        ldfetch.get.mockResolvedValueOnce(mock_response);
+        jest.spyOn(global, 'fetch').mockResolvedValue({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            headers: {
+                get: () => 'text/turtle',
+            },
+            text: async () => '<http://example.com/profile/card#me> <http://www.w3.org/ns/solid/terms#publicTypeIndex> <http://example.com/settings/publicTypeIndex> .',
+        } as any);
 
     });
 
     it('should_handle_error_during_fetch', async () => {
         const pod_url = 'http://n061-14a.wall2.ilabt.iminds.be:3000/';
-        ldfetch.get.mockRejectedValueOnce('Error: Could not fetch profile document');
+        const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Error: Could not fetch profile document'));
         const result = await find_public_type_index(pod_url);
-        expect(ldfetch.get).toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalled();
         expect(result).toBe('');
     });
 });

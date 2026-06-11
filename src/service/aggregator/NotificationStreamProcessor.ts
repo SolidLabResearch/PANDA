@@ -54,23 +54,28 @@ export class NotificationStreamProcessor {
             this.logger.info({}, `subscribing_to_ldes_stream_for_the_latest_events`);
             console.log(`Subscribing to the LDES Stream ${this.ldes_stream} for the latest events`);
             if (this.ldes_stream !== undefined) {
-                const subscription_server = await extract_subscription_server(this.ldes_stream);
-                if (subscription_server !== undefined) {
-                    const server = subscription_server.location;
-                    const response_subscription = await create_subscription(server, this.ldes_stream);
-                    if (response_subscription) {
-                        this.logger.info({}, `subscription_to_ldes_stream_was_successful`);
-                        console.log(`Subscription to the LDES Stream ${this.ldes_stream} was successful.`);
+                try {
+                    const subscription_server = await extract_subscription_server(this.ldes_stream);
+                    if (subscription_server !== undefined) {
+                        const server = subscription_server.location;
+                        const response_subscription = await create_subscription(server, this.ldes_stream);
+                        if (response_subscription) {
+                            this.logger.info({}, `subscription_to_ldes_stream_was_successful`);
+                            console.log(`Subscription to the LDES Stream ${this.ldes_stream} was successful.`);
 
+                        }
+                        else {
+                            this.logger.error({}, `subscription_to_ldes_stream_failed`);
+                            console.log(`Subscription to the LDES Stream ${this.ldes_stream} failed. The response object is empty.`);
+                        }
                     }
                     else {
-                        this.logger.error({}, `subscription_to_ldes_stream_failed`);
-                        console.log(`Subscription to the LDES Stream ${this.ldes_stream} failed. The response object is empty.`);
+                        this.logger.error({}, `subscription_server_is_undefined_subscription_to_ldes_stream_failed`);
+                        console.log(`The subscription server is undefined. The subscription to the LDES Stream ${this.ldes_stream} failed.`);
                     }
-                }
-                else {
-                    this.logger.error({}, `subscription_server_is_undefined_subscription_to_ldes_stream_failed`);
-                    console.log(`The subscription server is undefined. The subscription to the LDES Stream ${this.ldes_stream} failed.`);
+                } catch (error) {
+                    this.logger.warn({}, `subscription_to_ldes_stream_failed_with_error`);
+                    console.warn(`Subscription setup failed for ${this.ldes_stream}. Continuing with direct webhook handling.`, error);
                 }
             }
             else {
@@ -114,9 +119,28 @@ export class NotificationStreamProcessor {
              * we need to compare the LDP resource before and after the PATCH request (i.e doing an incremental maintainance of the LDP resource) which is out of scope
              * of the Solid Stream Aggregator (for now, and the support for this will be implemented in the future).
              */
-            const latest_event_store = await turtleStringToStore(latest_event);
-            const timestamp = latest_event_store.getQuads(null, DF.namedNode(timestamp_predicate), null, null)[0].object.value;
+            let latest_event_store: any;
+            try {
+                latest_event_store = await turtleStringToStore(latest_event);
+            } catch (error) {
+                this.logger.warn({}, 'latest_event_parsing_failed_skipping_event');
+                console.warn(`Skipping malformed latest event for ${this.ldes_stream}.`, error);
+                return;
+            }
+
+            const timestamp_quad = latest_event_store.getQuads(null, DF.namedNode(timestamp_predicate), null, null)[0];
+            if (!timestamp_quad) {
+                this.logger.warn({}, 'latest_event_missing_timestamp_skipping_event');
+                console.warn(`Skipping latest event without ${timestamp_predicate} for ${this.ldes_stream}.`);
+                return;
+            }
+            const timestamp = timestamp_quad.object.value;
             const timestamp_epoch = Date.parse(timestamp);
+            if (Number.isNaN(timestamp_epoch)) {
+                this.logger.warn({}, 'latest_event_invalid_timestamp_skipping_event');
+                console.warn(`Skipping latest event with invalid timestamp ${timestamp} for ${this.ldes_stream}.`);
+                return;
+            }
             if (this.stream_name) {
                 this.logger.info({}, 'latest_event_received_preprocessing_completed_adding_to_rsp_engine_started');
                 console.log(`Adding the event store to the RSP Engine for the stream ${this.stream_name}`);

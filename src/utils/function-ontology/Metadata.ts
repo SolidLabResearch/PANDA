@@ -1,11 +1,11 @@
 import { Bindings } from "@comunica/types";
 import { LDESinLDP, LDPCommunication } from "@treecg/versionawareldesinldp";
 import { QuadWithID } from "../Types";
+import { RdfHttpClient } from "../RdfHttpClient";
 
 const N3 = require('n3');
 const writer = new N3.Writer()
-const ld_fetch = require('ldfetch');
-const fetch = new ld_fetch({});
+const rdfFetch = new RdfHttpClient();
 const QueryEngine = require('@comunica/query-sparql').QueryEngine;
 const myEngine = new QueryEngine();
 
@@ -17,7 +17,7 @@ const myEngine = new QueryEngine();
  */
 export async function get_metadata_container(resource: string): Promise<string> {
     const ldp_container_meta = resource.split("/").slice(0, -1).join("/") + "/.meta";
-    const metadata = await fetch.get(ldp_container_meta);
+    const metadata = await rdfFetch.get(ldp_container_meta);
     const store = new N3.Store();
     for (const quad of metadata.triples) {
         if (quad.predicate.value !== "http://www.w3.org/ns/ldp#contains") {
@@ -35,7 +35,7 @@ export async function get_metadata_container(resource: string): Promise<string> 
 export async function trace_original_events(resource: string) {
     await get_container_stream_metadata(resource).then((stream: string | undefined) => {
         console.log(`Stream: ${stream}`);
-        fetch.get(resource).catch((error: Error) => {
+        rdfFetch.get(resource).catch((error: Error) => {
             console.log(error);
             // TODO: add the type for the resource metadata
         }).then(async (resource_metadata: any) => {
@@ -86,7 +86,7 @@ async function get_original_events(registered_stream: string, aggregation_event_
  */
 async function get_container_stream_metadata(ldp_resource: string): Promise<string | undefined> {
     const ldp_container_meta: string = ldp_resource.split("/").slice(0, -1).join("/") + "/.meta";
-    const metadata = await fetch.get(ldp_container_meta).catch((error: Error) => {
+    const metadata = await rdfFetch.get(ldp_container_meta).catch((error: Error) => {
         console.log(error);
     });
     if (metadata !== undefined) {
