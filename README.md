@@ -276,19 +276,6 @@ Detailed evaluation material remains in documentation and branch-specific artifa
 
 Available branches include baseline-scenario, limited-access-caregiver-scenario, policy-based-denial, protected-alert, authorized-caregiver-alert-read-benchmark, policy-size-benchmark, concurrent-requests, and benchmark-cpu-memory, alongside feature and migration branches. main does not contain the benchmark directories used by those branches. A checkout of main alone does not reproduce every paper experiment; use the branch mapping and pin relevant PANDA, UMA, data, and RSP-JS revisions before citing results.
 
-## Known limitations and research-prototype notes
-
-- **Docker is not a working installation path on main.** Dockerfile runs npm install with the external file:../RSP/RSP-JS dependency unavailable in the Docker build context, exposes port 8080, and invokes npm run start-aggregation. No start-aggregation script exists in package.json. docker-compose.yaml only maps port 8080 and does not solve either issue.
-- **The CLI Solid-server option is ineffective.** Commander creates options.solid_server_url, while the action reads options.SolidServer; the stored value is also not used by the active stream path.
-- **Notification routing is partly hard-coded.** src/utils/notifications/Util.ts hard-codes a remote WebhookChannel2023 subscription server, while aggregator_setup.json contains a different remote PANDA HTTP destination. Local-only use requires code/configuration alignment.
-- **Stream discovery is not active.** The server accepts stream URLs already present in the query. Type Index locator and discovery helpers do not prove automatic Pod-to-stream resolution on main.
-- **Authorization setup is incomplete on main.** The active fetcher uses a fixed replayer claim, source credentials are exact URL-keyed JSON entries, and the local CSS script uses allow-all. Policy scenario branches add stronger UMA/ODRL setup and validation.
-- **Rule handling is singleton-scoped.** The first WebSocket query initializes the reasoner’s rules; later query rule strings do not replace that singleton, and the historical WebID-rule fallback contains an assignment condition, so it is not a reliable fallback path.
-- **The heart example is not self-contained.** Dataset documentation is a template, the compatible UMA revision is not pinned, and the example stream is not represented in the historical credential map in src/config/PodToken.json.
-- **Result persistence is disabled.** The LDES publisher and aggregation-pod configuration remain in the tree, but the active WebSocket path sends results to clients and does not reliably materialize them into the aggregation pod.
-- **Credential hygiene requires attention.** Tracked JSON files contain development/example account or token material. Treat them as non-production fixtures, rotate values used outside a disposable environment, and never add real credentials.
-- **Repository metadata has a small inconsistency.** package.json declares ISC, while LICENCE.md contains MIT licence text. The licence file is the authoritative human-readable licence artifact.
-
 ## Research context
 
 PANDA is maintained as a research prototype and research artifact. The repository does not currently contain a stable publication citation. Publication/citation information will be added here when the project provides one.
